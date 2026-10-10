@@ -74,6 +74,7 @@ Update later with `claude plugin update <mod-name>@claude-mods`, then `/reload-p
 
 | Mod | What it does | Install |
 | --- | --- | --- |
+| 📡 [`session-radar`](mods/session-radar) | A live sidebar for long sessions: limits and forecast, context, agents, background shells, progress | `/plugin install session-radar@claude-mods` |
 | 🔔 [`waiting-bell`](mods/waiting-bell) | Rings, notifies and flashes a banner whenever Claude is waiting for you; repeats every 5 min until you answer | `/plugin install waiting-bell@claude-mods` |
 
 Have an idea? [Suggest a mod →](https://github.com/ibrahimkobeissy/claude-mods/issues/new?template=mod_request.yml)

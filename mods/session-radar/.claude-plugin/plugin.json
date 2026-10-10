@@ -1,0 +1,19 @@
+{
+  "name": "session-radar",
+  "version": "0.1.0",
+  "description": "A live sidebar for long sessions: usage limits, context, agents, background shells and progress at a glance",
+  "author": { "name": "Ibrahim Kobeissy", "url": "https://github.com/ibrahimkobeissy" },
+  "homepage": "https://github.com/ibrahimkobeissy/claude-mods/tree/main/mods/session-radar",
+  "repository": "https://github.com/ibrahimkobeissy/claude-mods",
+  "license": "MIT",
+  "keywords": ["sidebar", "pane", "agents", "background", "shells", "usage", "limits", "context", "monitor"],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "autoOpen": {
+      "type": "boolean",
+      "title": "Open on start",
+      "description": "Open the radar pane when a session starts (only where it fits as a sidebar)",
+      "default": false
+    }
+  }
+}

@@ -10,6 +10,11 @@
   },
   "plugins": [
     {
+      "name": "session-radar",
+      "source": "./mods/session-radar",
+      "description": "A live sidebar for long sessions: usage limits, context, agents, background shells and progress at a glance"
+    },
+    {
       "name": "waiting-bell",
       "source": "./mods/waiting-bell",
       "description": "Rings a bell and shows a banner whenever Claude is blocked waiting for you, repeating every 5 minutes until you answer",
