@@ -16,7 +16,7 @@ const PANE = (bodyColumns = 46, isFocused = false) => ({
 })
 
 // Stands in for the engine beneath the plugin.
-function world(on: On, { files = {}, now = 1_000_000 }: { files?: Record<string, string>; now?: number } = {}) {
+function world(on: On, { files = {}, now = 1_000_000, git }: { files?: Record<string, string>; now?: number; git?: string } = {}) {
   const clock = mock.clock(on, { now })
   const toasts: string[] = []
   const opened: string[] = []
@@ -35,7 +35,10 @@ function world(on: On, { files = {}, now = 1_000_000 }: { files?: Record<string,
   })
   on('agent.list', () => ({ value: [] }))
   on('session.cwd', () => ({ value: '/home/me/app' }))
-  on('process.run', () => ({ value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('process.run', (_$, e) => {
+    const isGit = git !== undefined && e.argv[0] === 'git' && e.argv.includes('--path-format=absolute')
+    return { value: { exitCode: isGit ? 0 : 1, stdout: isGit ? git : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
   on('fs.stat', (_$, e) => {
     const text = files[e.path]
     if (text === undefined) throw new Error('missing')
@@ -326,3 +329,20 @@ test('agents get their own box, even with none yet', async ($, on) => {
   expect(await ui.find({ text: 'none yet' })).toBeDefined()
   expect(await ui.find({ key: 'fold-agents' })).toBeDefined()
 })
+
+for (const [name, stdout, label] of [
+  ['a checkout', 'main\n/home/me/app/.git\n/home/me/app/.git\n', '⎇ main'],
+  ['a worktree', 'fix/x\n/home/me/app/.git/worktrees/x\n/home/me/app/.git\n', '⎇ fix/x (worktree)'],
+] as const) {
+  test(`the branch line reads ${name} right`, async ($, on) => {
+    world(on, { git: stdout })
+    on('session.model', () => ({ value: 'claude-opus-5-5' }))
+    on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200_000 }, rateLimits: [] } }))
+    on('command.register', () => ({ value: { command: 'radar' } }))
+    on('session.start', (_$, e) => ({ cwd: e.cwd }))
+    await $.session.start({ cwd: '/home/me/app', surface: 'terminal', isInteractive: true })
+
+    const ui = await $.ui.mount({ ...PANE(), surface: 'terminal' })
+    expect(await ui.find({ text: label })).toBeDefined()
+  })
+}

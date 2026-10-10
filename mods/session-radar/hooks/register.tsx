@@ -46,11 +46,14 @@ const branchOf = new Map<string, { branch?: string; isWorktree: boolean }>()
 // ── reading the world ────────────────────────────────────────────────────────
 
 async function readBranch($: EngineInterface, cwd: string) {
-  const ran = await $.process
-    .run(['git', '-C', cwd, 'rev-parse', '--abbrev-ref', 'HEAD', '--git-dir', '--git-common-dir'], { timeoutMs: 3000 })
-    .catch(() => undefined)
-  if (!ran || ran.exitCode !== 0) return { isWorktree: false }
-  const [head, gitDir, commonDir] = ran.stdout.trim().split('\n')
+  // Absolute paths: from a subfolder git prints the git dir absolute and the
+  // common dir relative, which would read as a worktree. Git before 2.31 lacks
+  // the flag, so the branch alone is asked for then.
+  const git = (args: string[]) => $.process.run(['git', '-C', cwd, ...args], { timeoutMs: 3000 }).catch(() => undefined)
+  const ran = await git(['rev-parse', '--abbrev-ref', 'HEAD', '--path-format=absolute', '--git-dir', '--git-common-dir'])
+  const out = ran?.exitCode === 0 ? ran : await git(['rev-parse', '--abbrev-ref', 'HEAD'])
+  if (!out || out.exitCode !== 0) return { isWorktree: false }
+  const [head, gitDir, commonDir] = out.stdout.trim().split('\n')
   const found = { branch: head === 'HEAD' ? 'detached' : head, isWorktree: Boolean(gitDir && commonDir && gitDir !== commonDir) }
   branchOf.set(cwd, found)
   return found
@@ -223,7 +226,7 @@ export const register: Register = (on, options) => {
     ticker = $.clock.every(TICK_MS, () => void onTick($))
     const cwd = await $.session.cwd().catch(() => undefined)
     await update($, main, (m): Main => ({ ...m, cwd: m.cwd ?? cwd }))
-    void refreshBranches($)
+    await refreshBranches($)
     if (options.autoOpen === true) void $.ui.open({ id: PANE, title: 'Radar' })
     return result
   })
