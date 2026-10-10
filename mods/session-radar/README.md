@@ -3,7 +3,7 @@
 **A live sidebar for long Claude Code sessions.** Usage limits, context, agents, background shells and progress, all in one small pane next to your transcript. It changes none of Claude Code's own behaviour.
 
 <p align="center">
-  <img src="assets/overview.png" alt="session-radar docked beside a Claude Code session" width="100%">
+  <img src="assets/overview.png" alt="session-radar docked beside a real Claude Code session with four agents and two background shells" width="100%">
 </p>
 
 ## Install
@@ -17,14 +17,15 @@ Then type `/radar` to open it, and `/radar` again to close it.
 
 ## What it shows
 
-| Section | What's in it |
+Each part of the session gets its own colour-coded box:
+
+| Box | What's in it |
 | --- | --- |
-| **⚠ Needs you** | Pinned at the top while a permission prompt, a question or a plan approval is waiting, and who it's from |
-| **Limits** | 5-hour and 7-day usage with reset times, session cost, cost per hour, and **when the 5h window fills at your current pace** |
-| **Main** | Model, effort, context bar (yellow, then red with "compaction soon"), git branch or worktree, session time |
-| **Agents** | Each subagent with status, type, task, running time, context, tool calls, errors and branch or worktree. Select one to see its last message |
-| **Background** | The background shells the footer counts: running ones first, then the last few finished. Select one to open its live output. Also lists scheduled cron jobs and `/loop` wakeups |
-| **Progress** | The live todo list (or task list), with the approved plan's title on top |
+| **⚠ Needs you** (yellow) | Shown while a permission prompt, a question or a plan approval is waiting, with who it's from and for how long |
+| **Main** (orange) | Model, effort, context gauge (turns yellow, then red with "compaction soon"), 5-hour and 7-day limits with reset times, **when the 5h window fills at your current pace**, the folder the session runs in, and your git branch or worktree |
+| **Agents** (lavender) | One card per subagent: task, type, context, tool calls, errors, branch or worktree, and running time. Select a card to see its last message |
+| **Background** (green) | The background shells the footer counts, running ones first, plus scheduled cron jobs and `/loop` wakeups. Select a shell to open its live output |
+| **Progress** (purple) | The task list and the approved plan, shown only when there is one |
 
 You also get a toast when a background shell or agent finishes or fails.
 
@@ -44,7 +45,7 @@ The radar never takes over your keyboard. While you type at the prompt, every Cl
 | --- | --- | --- |
 | `ctrl+x tab` | prompt | Moves the keyboard into the pane (press it again if another plugin's band is showing) |
 | `tab` / `shift+tab` | pane | Next / previous row |
-| `enter` | pane | Open a shell, show an agent's details, fold or unfold a section |
+| `enter` | pane | Open a shell, show an agent's last message, fold or unfold a box |
 | `↑` `↓` | pane | Scroll |
 | `b` / `c` / `s` | shell view | Back / copy / stop |
 | `esc` | pane | Back to the prompt |

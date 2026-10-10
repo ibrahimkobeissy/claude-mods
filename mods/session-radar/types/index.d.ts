@@ -6,12 +6,11 @@ export type Usage = {
   contextWindow: number
   contextPercent?: number
   rateLimits: RateLimit[]
-  costUsd?: number
 }
 
 export type LimitSample = { kind: string; at: number; percentUsed: number; resetsAt?: string }
 
-export type Main = { model?: string; effort?: string; branch?: string; isWorktree: boolean }
+export type Main = { model?: string; effort?: string; cwd?: string; branch?: string; isWorktree: boolean }
 
 export type AgentStatusName = 'pending' | 'running' | 'waiting' | 'idle' | 'completed' | 'failed' | 'killed'
 
@@ -38,6 +37,7 @@ export type ShellRow = {
   id: string
   kind: string
   command: string
+  description?: string
   startedAt: number
   status: ShellStatus
   endedAt?: number

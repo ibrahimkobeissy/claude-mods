@@ -36,12 +36,16 @@ export function resetLabel(iso: string | undefined, now: number) {
   return `resets ${new Date(at).toLocaleDateString('en-US', { weekday: 'short' })} ${clock(at)}`
 }
 
+// "claude-opus-5-5" → "Opus 5.5", "claude-haiku-4-5-20251001" → "Haiku 4.5".
 export function modelName(model: string) {
-  return model.replace(/^claude-/, '')
+  const [family, ...rest] = model.replace(/^claude-/, '').replace(/\[.*\]$/, '').split('-')
+  if (!family) return model
+  const version = rest.filter(p => /^\d{1,2}$/.test(p)).join('.')
+  return `${family[0]!.toUpperCase()}${family.slice(1)}${version ? ` ${version}` : ''}`
 }
 
 export function clip(text: string, width: number) {
-  const flat = text.replace(/\s+/g, ' ').trim()
+  const flat = text.replace(/\s+/g, ' ')
   if (width <= 1) return flat.slice(0, Math.max(0, width))
   return flat.length > width ? `${flat.slice(0, width - 1)}…` : flat
 }
@@ -84,12 +88,6 @@ export function forecast(samples: readonly LimitSample[], limit: RateLimit, now:
   return { kind: 'full', at }
 }
 
-export function burnRate(costUsd: number | undefined, startedAt: number, now: number) {
-  const hours = (now - startedAt) / (60 * MIN)
-  if (costUsd === undefined || hours < 5 / 60) return undefined
-  return costUsd / hours
-}
-
 export type TaskNotice = { id: string; status: ShellStatus; summary: string; outputPath?: string }
 
 const tag = (text: string, name: string) => text.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`))?.[1]?.trim()
@@ -128,4 +126,41 @@ export function lastLine(text: string) {
 
 export function parentDir(path: string) {
   return path.slice(0, Math.max(0, path.lastIndexOf('/')))
+}
+
+// "0:42", "12:05", "1:02:09": a running time as a stopwatch reads it.
+export function stopwatch(ms: number) {
+  const s = Math.max(0, Math.floor(ms / 1000))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const ss = String(s % 60).padStart(2, '0')
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`
+}
+
+const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
+
+// Five cells, filled up to the effort level: ▮▮▯▯▯ for medium.
+export function effortMeter(effort: string | undefined) {
+  const level = effort === undefined ? -1 : EFFORTS.indexOf(effort)
+  if (level < 0) return undefined
+  return { full: '▮'.repeat(level + 1), empty: '▯'.repeat(EFFORTS.length - level - 1) }
+}
+
+// A thin gauge: ▬▬▬▬▱▱▱▱.
+export function gauge(percent: number, width: number) {
+  const full = Math.max(0, Math.min(width, Math.round((percent / 100) * width)))
+  return { full: '▬'.repeat(full), empty: '▱'.repeat(width - full) }
+}
+
+// A dim rule with dots on it, the joint between two boxes.
+export function connector(width: number, dots: number) {
+  const cells = Array.from({ length: Math.max(0, width) }, () => '─')
+  for (let i = 1; i <= dots; i++) cells[Math.round((i * width) / (dots + 1))] = '•'
+  return cells.join('').split('•')
+}
+
+// "/home/me/projects/app" → "~/projects/app"; too long, it keeps the end: "…/deep/app".
+export function shortPath(path: string, home: string | undefined, width: number) {
+  const tilde = home && (path === home || path.startsWith(`${home}/`)) ? `~${path.slice(home.length)}` : path
+  return tilde.length > width ? `…${tilde.slice(tilde.length - width + 1)}` : tilde
 }

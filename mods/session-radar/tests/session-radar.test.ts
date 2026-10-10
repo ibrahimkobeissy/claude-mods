@@ -229,14 +229,15 @@ test('agents are listed with their tool calls, context and last words', async ($
   await $.tool.call({ tool: 'Read', file_path: '/b', agentId: 'ag1' } as Parameters<typeof $.tool.call>[0])
   for await (const _ of $.turn.step({ turnId: 't', index: 0, model: 'claude-haiku-4-5', messageCount: 3, agentId: 'ag1' })) void _
 
-  const ui = await $.ui.mount({ ...PANE(), surface: 'terminal' })
-  expect(await ui.find({ key: 'agent-ag1', text: /Explore: find test fixtures/ })).toBeDefined()
+  const ui = await $.ui.mount({ ...PANE(80), surface: 'terminal' })
+  expect(await ui.find({ key: 'agent-ag1', text: /1: find test fixtures/ })).toBeDefined()
+  expect(await ui.find({ text: 'Explore' })).toBeDefined()
   expect(await ui.find({ text: /ctx 62k · 2 tools/ })).toBeDefined()
-  expect(await ui.find({ text: /1 running · 0 done/ })).toBeDefined()
+  expect(await ui.find({ text: /1 running · 1 total/ })).toBeDefined()
 
   await $.session.receive(notice('ag1', 'completed', 'Agent "find test fixtures" completed'))
   expect(w.toasts.at(-1)).toBe('✓ agent completed: find test fixtures')
-  expect(await ui.find({ text: /0 running · 1 done/ })).toBeDefined()
+  expect(await ui.find({ text: /0 running · 1 total/ })).toBeDefined()
 
   // Done agents fold to one line; pressing one shows its last words.
   expect(await ui.find({ text: /Found 4 fixture dirs/ })).toBeUndefined()
@@ -297,4 +298,23 @@ test('a notice delivered as a prompt marks the shell done', async ($, on) => {
   expect(w.toasts).toEqual(['✗ shell failed: make build (exit 2)'])
   const ui = await $.ui.mount({ ...PANE(), surface: 'terminal' })
   expect(await ui.find({ text: /1 running/ })).toBeUndefined()
+})
+
+test('progress stays hidden until there is a list or a plan', async ($, on) => {
+  world(on)
+  const ui = await $.ui.mount({ ...PANE(), surface: 'terminal' })
+  expect(await ui.find({ text: 'PROGRESS' })).toBeUndefined()
+})
+
+test('the main box shows where the session runs', async ($, on) => {
+  world(on)
+  mock.env(on, { HOME: '/home/me' })
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200_000 }, rateLimits: [] } }))
+  on('command.register', () => ({ value: { command: 'radar' } }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/home/me/app', surface: 'terminal', isInteractive: true })
+
+  const ui = await $.ui.mount({ ...PANE(), surface: 'terminal' })
+  expect(await ui.find({ text: /dir +~\/app/ })).toBeDefined()
 })
