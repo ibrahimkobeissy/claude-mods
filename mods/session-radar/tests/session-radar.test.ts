@@ -82,7 +82,7 @@ test('a background shell is listed, then marked done with a toast', async ($, on
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...PANE(), surface })
     expect(await ui.find({ key: 'shell-b1' })).toBeDefined()
-    expect((await ui.find({ text: /1 running/ }))).toBeDefined()
+    expect((await ui.find({ text: '1 shell' }))).toBeDefined()
     await ui.unmount()
   }
 
@@ -90,7 +90,7 @@ test('a background shell is listed, then marked done with a toast', async ($, on
   expect(w.toasts.at(-1)).toBe('✓ shell completed: npm run dev (exit 0)')
 
   const ui = await $.ui.mount({ ...PANE(), surface: 'terminal' })
-  expect(await ui.find({ text: /1 running/ })).toBeUndefined()
+  expect(await ui.find({ text: '1 shell' })).toBeUndefined()
   expect(await ui.find({ key: 'shell-b1' })).toBeDefined()
 })
 
@@ -275,7 +275,7 @@ test('a stopped shell is marked killed', async ($, on) => {
   await $.tool.call({ tool: 'TaskStop', task_id: 'b6' })
 
   const ui = await $.ui.mount({ ...PANE(), surface: 'terminal' })
-  expect(await ui.find({ text: /1 running/ })).toBeUndefined()
+  expect(await ui.find({ text: '1 shell' })).toBeUndefined()
   await ui.press({ key: 'shell-b6' })
   expect(await ui.find({ text: /killed/ })).toBeDefined()
 })
@@ -300,7 +300,7 @@ test('a notice delivered as a prompt marks the shell done', async ($, on) => {
 
   expect(w.toasts).toEqual(['✗ shell failed: make build (exit 2)'])
   const ui = await $.ui.mount({ ...PANE(), surface: 'terminal' })
-  expect(await ui.find({ text: /1 running/ })).toBeUndefined()
+  expect(await ui.find({ text: '1 shell' })).toBeUndefined()
 })
 
 test('progress stays hidden until there is a list or a plan', async ($, on) => {
@@ -365,4 +365,46 @@ test('autoOpen off keeps the pane closed on start', { options: { autoOpen: false
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   await $.session.start({ cwd: '/home/me/app', surface: 'terminal', isInteractive: true })
   expect(w.opened).toEqual([])
+})
+
+test('monitors are listed and counted apart from shells', async ($, on) => {
+  world(on)
+  answerBash(on, 'b9')
+  on('tool.call', { tool: 'Monitor' }, () => ({ result: { taskId: 'm1', timeoutMs: 300_000 } }))
+  await $.tool.call({ tool: 'Bash', ...background('b9', 'npm run dev') })
+  await $.tool.call({ tool: 'Monitor', description: 'watch deploy logs', timeout_ms: 300_000, command: 'tail -f deploy.log' })
+
+  const ui = await $.ui.mount({ ...PANE(), surface: 'terminal' })
+  expect(await ui.find({ text: '1 shell · 1 monitor' })).toBeDefined()
+  expect(await ui.find({ key: 'shell-m1', text: /watch deploy logs/ })).toBeDefined()
+})
+
+test('a foreground subagent\'s shell ends with that agent', async ($, on) => {
+  const w = world(on)
+  on('agent.spawn', () => ({ model: 'claude-haiku-4-5', agentId: 'ag5' }))
+  on('tool.call', { tool: 'Bash' }, () => ({
+    result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'b10', backgroundEndsWithFinalResponse: true as const },
+    text: 'Command running in background with ID: b10. Output is being written to: /tmp/claude/tasks/b10.output.',
+  }))
+  await $.agent.spawn(SPAWN)
+  await $.tool.call({ tool: 'Bash', command: 'npm run watch', run_in_background: true, agentId: 'ag5' } as Parameters<typeof $.tool.call>[0])
+
+  await $.session.receive(notice('ag5', 'completed', 'Agent "find test fixtures" completed'))
+
+  const ui = await $.ui.mount({ ...PANE(), surface: 'terminal' })
+  expect(await ui.find({ text: '1 shell' })).toBeUndefined()
+  expect(w.toasts.at(-1)).toBe('✓ agent completed: find test fixtures')
+})
+
+test('a monitor\'s events do not end it; its final notice does', async ($, on) => {
+  world(on)
+  on('tool.call', { tool: 'Monitor' }, () => ({ result: { taskId: 'm2', timeoutMs: 60_000 } }))
+  await $.tool.call({ tool: 'Monitor', description: 'watch ticks', timeout_ms: 60_000, command: 'tail -f x' })
+
+  await $.session.receive({ origin: { kind: 'task-notification' }, text: '<task-notification>\n<task-id>m2</task-id>\n<summary>Monitor event: "watch ticks": tick 1</summary>\n</task-notification>' })
+  const ui = await $.ui.mount({ ...PANE(), surface: 'terminal' })
+  expect(await ui.find({ text: '1 monitor' })).toBeDefined()
+
+  await $.session.receive(notice('m2', 'completed', 'Monitor "watch ticks" ended'))
+  expect(await ui.find({ text: '1 monitor' })).toBeUndefined()
 })

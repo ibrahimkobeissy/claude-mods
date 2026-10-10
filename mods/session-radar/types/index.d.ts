@@ -44,6 +44,8 @@ export type ShellRow = {
   summary?: string
   outputPath?: string
   agentId?: string
+  // Started by a foreground subagent: the engine stops it when that agent ends.
+  endsWithAgent?: boolean
 }
 
 export type Cron = { id: string; schedule: string; recurring: boolean; prompt: string; at?: number }

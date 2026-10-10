@@ -1,6 +1,6 @@
 {
   "name": "session-radar",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A live sidebar for long sessions: usage limits, context, agents, background shells and progress at a glance",
   "author": { "name": "Ibrahim Kobeissy", "url": "https://github.com/ibrahimkobeissy" },
   "homepage": "https://github.com/ibrahimkobeissy/claude-mods/tree/main/mods/session-radar",

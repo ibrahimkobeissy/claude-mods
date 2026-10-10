@@ -110,6 +110,24 @@ async function pollAgents($: EngineInterface) {
 async function announceAgentEnd($: EngineInterface, agent: AgentRow, status: AgentStatusName, now: number) {
   const word = status === 'completed' ? 'completed' : status
   $.ui.toast(`${status === 'completed' ? '✓' : '✗'} agent ${word}: ${clip(agent.description, 40)}`)
+  // The engine stops a foreground subagent's background shells with it.
+  await update($, shells, all => {
+    let next = all
+    for (const x of Object.values(all)) {
+      if (x.agentId === agent.id && x.endsWithAgent && x.status === 'running') {
+        next = { ...next, [x.id]: { ...x, status: 'completed', endedAt: now, summary: 'ended with its agent' } }
+      }
+    }
+    return next
+  })
+}
+
+// "1 shell · 4 monitors", the way the footer counts what runs in the background.
+function backgroundCount(live: readonly ShellRow[]) {
+  const shells = live.filter(x => x.kind === 'shell').length
+  const others = live.length - shells
+  const parts = [shells ? `${shells} shell${shells === 1 ? '' : 's'}` : '', others ? `${others} monitor${others === 1 ? '' : 's'}` : '']
+  return parts.filter(Boolean).join(' · ')
 }
 
 async function onTick($: EngineInterface) {
@@ -302,14 +320,31 @@ export const register: Register = (on, options) => {
   // A background shell: Bash with run_in_background, or one the person backgrounded.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const ran = await next(e)
-    const id = ran.deny === undefined && ran.isError !== true ? ran.result?.backgroundTaskId : undefined
+    const result = ran.deny === undefined && ran.isError !== true ? ran.result : undefined
+    const id = result?.backgroundTaskId
     if (id) {
       const known = Object.values(await read($, shells)).find(s => s.outputPath)?.outputPath
       const outputPath = outputPathOf(ran.text) ?? (known ? `${parentDir(known)}/${id}.output` : undefined)
       const startedAt = await $.clock.now()
+      const endsWithAgent = result.backgroundEndsWithFinalResponse === true
       await update($, shells, (all): Record<string, ShellRow> => ({
         ...all,
-        [id]: { id, kind: 'shell', command: e.command, description: e.description, startedAt, status: 'running', outputPath, agentId: e.agentId },
+        [id]: { id, kind: 'shell', command: e.command, description: e.description, startedAt, status: 'running', outputPath, agentId: e.agentId, endsWithAgent },
+      }))
+    }
+    return ran
+  })
+
+  // A monitor: a background watch the footer counts beside the shells.
+  on('tool.call', { tool: 'Monitor' }, async ($, e, next) => {
+    const ran = await next(e)
+    const id = ran.deny === undefined && ran.isError !== true ? ran.result?.taskId : undefined
+    if (id) {
+      const startedAt = await $.clock.now()
+      const command = e.command ?? e.ws?.url ?? e.description
+      await update($, shells, (all): Record<string, ShellRow> => ({
+        ...all,
+        [id]: { id, kind: 'monitor', command, description: e.description, startedAt, status: 'running', outputPath: outputPathOf(ran.text), agentId: e.agentId },
       }))
     }
     return ran
@@ -442,10 +477,13 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
+  // Notices also arrive mid-turn as queued attachments, and a subagent's own
+  // shells report to that subagent: any row, in any conversation, can carry one.
+  // Only rows that are a notice: a file read or a reply may quote one.
   on('session.append', async ($, e, next) => {
-    if (e.agentId === undefined && e.message.role === 'user') {
-      const text = e.message.content.map(b => (b.type === 'text' ? b.text : '')).join('\n')
-      if (text.includes('<task-notification>')) await applyNotices($, text)
+    if (e.message.role === 'user' && e.door !== 'tool-result') {
+      const text = e.message.content.map(b => (b.type === 'text' ? b.text : '')).join('\n').trim()
+      if (text.startsWith('<task-notification>')) await applyNotices($, text)
     }
     return next(e)
   })
@@ -740,7 +778,7 @@ export const register: Register = (on, options) => {
         ))}
 
         {joint('j-background', C.agents)}
-        {box('background', C.shells, 'BACKGROUND · shells', liveShells.length ? `${liveShells.length} running` : '', bgBody)}
+        {box('background', C.shells, 'BACKGROUND', backgroundCount(liveShells), bgBody)}
         {items.length || prog.plan ? joint('j-progress', C.shells) : null}
         {items.length || prog.plan ? box('progress', C.progress, 'PROGRESS', items.length ? `${finished}/${items.length}` : '', progBody) : null}
 

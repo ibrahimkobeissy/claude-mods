@@ -96,7 +96,9 @@ const tag = (text: string, name: string) => text.match(new RegExp(`<${name}>([\\
 export function parseTaskNotice(text: string): TaskNotice | undefined {
   const id = tag(text, 'task-id')
   if (!id) return undefined
-  const raw = tag(text, 'status') ?? 'completed'
+  // A monitor's events come as notices too, with no status: only an end has one.
+  const raw = tag(text, 'status')
+  if (!raw) return undefined
   const status: ShellStatus = raw === 'failed' || raw === 'killed' ? raw : 'completed'
   return { id, status, summary: tag(text, 'summary') ?? '', outputPath: tag(text, 'output-file') }
 }
