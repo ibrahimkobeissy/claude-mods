@@ -1,14 +1,14 @@
-import type { On } from 'claude-code'
+import type { AgentStatus, On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
 const FIVE_MIN = 5 * 60 * 1000
 const SOUNDS = new Set(['pw-play', 'paplay', 'canberra-gtk-play', 'aplay', 'afplay'])
 
-type World = { uname?: string; env?: Readonly<Record<string, string>>; missing?: string[] }
+type World = { uname?: string; env?: Readonly<Record<string, string>>; missing?: string[]; agents?: [string, AgentStatus][] }
 
 // Stands in for the engine beneath the plugin: records the commands run and
 // the status line, and answers the events the plugin passes down.
-function world(on: On, { uname = 'Linux', env = {}, missing = [] }: World = {}) {
+function world(on: On, { uname = 'Linux', env = {}, missing = [], agents = [] }: World = {}) {
   const runs: string[][] = []
   const status: (string | undefined)[] = []
   mock.env(on, env)
@@ -25,7 +25,8 @@ function world(on: On, { uname = 'Linux', env = {}, missing = [] }: World = {}) 
   })
   on('session.cwd', () => ({ value: '/home/me/project' }))
   on('turn.complete', (_$, e) => ({ text: e.answer }))
-  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  on('prompt.submit', (_$, e) => ({ text: e.text }))
+  on('agent.list', () => ({ value: agents.map(([id, status]) => ({ id, status, type: 'Explore', description: id })) }))
   on('classic.Notification', () => ({}))
   const commands = () => runs.map(r => r[0])
   const rings = () => commands().filter(c => SOUNDS.has(c ?? '') || (c === 'powershell.exe' && /Sound/.test(runs.find(r => r[0] === c)?.[3] ?? ''))).length
@@ -34,7 +35,7 @@ function world(on: On, { uname = 'Linux', env = {}, missing = [] }: World = {}) 
 
 const answered = { answer: 'done', durationMs: 10, isAborted: false, turnId: 't1', reason: 'answer' } as const
 
-test('rings when the turn ends, again every 5 minutes, and stops when a turn starts', async ($, on) => {
+test('rings when the turn ends, again every 5 minutes, and stops when the person answers', async ($, on) => {
   const clock = mock.clock(on, { now: 1_000 })
   const w = world(on)
 
@@ -46,7 +47,7 @@ test('rings when the turn ends, again every 5 minutes, and stops when a turn sta
   await clock.advance(FIVE_MIN)
   expect(w.rings()).toBe(2)
 
-  await $.turn.start({ text: 'hi', turnId: 't2' })
+  await $.prompt.submit({ text: 'hi', wait: false, origin: { kind: 'composer' } })
   expect(w.status.at(-1)).toBe(undefined)
 
   await clock.advance(FIVE_MIN * 3)
@@ -116,3 +117,74 @@ for (const [name, env] of [
     expect(w.commands()).not.toContain('uname')
   })
 }
+
+const fromNotice = { text: '<task-notification><task-id>b1</task-id><status>completed</status></task-notification>', wait: false, origin: { kind: 'task-notification' as const } }
+
+test('no ring while a background agent is still running', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on, { agents: [['ag1', 'running']] })
+
+  await $.turn.complete(answered)
+  await clock.settle()
+  expect(w.rings()).toBe(0)
+  expect(w.runs).toEqual([])
+})
+
+test('a finished background task wakes the session without ringing again', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+
+  await $.turn.complete(answered)
+  await clock.settle()
+  expect(w.rings()).toBe(1)
+
+  // A shell finishes: the session handles its notice on its own.
+  await $.prompt.submit(fromNotice)
+  await $.turn.complete({ ...answered, turnId: 't2' })
+  await clock.settle()
+  expect(w.rings()).toBe(1)
+
+  // Still waiting on the person: the 5-minute reminder carries on.
+  await clock.advance(5 * 60 * 1000)
+  expect(w.rings()).toBe(2)
+})
+
+test('a notice turn after the person answered rings once, when it is done', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+
+  await $.prompt.submit({ text: 'go', wait: false, origin: { kind: 'composer' } })
+  await $.prompt.submit(fromNotice)
+  await clock.settle()
+  expect(w.rings()).toBe(0)
+
+  await $.turn.complete(answered)
+  await clock.settle()
+  expect(w.rings()).toBe(1)
+})
+
+test('a subagent\'s tool call does not end the wait', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  on('tool.call', { tool: 'Read' }, () => ({ result: { type: 'text', file: { filePath: 'a', content: '', numLines: 0, startLine: 1, totalLines: 0 } } }))
+
+  await $.turn.complete(answered)
+  await clock.settle()
+  await $.tool.call({ tool: 'Read', file_path: '/a', agentId: 'ag1' } as Parameters<typeof $.tool.call>[0])
+  await clock.advance(5 * 60 * 1000)
+  expect(w.rings()).toBe(2)
+})
+
+test('a permission prompt ends once a tool in its loop finishes', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on)
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '', stderr: '', interrupted: false } }))
+
+  await $.classic.Notification({ message: 'Claude needs your permission to use Bash', notification_type: 'permission_prompt' })
+  await clock.settle()
+  expect(w.rings()).toBe(1)
+  await $.tool.call({ tool: 'Bash', command: 'ls' })
+  expect(w.status.at(-1)).toBe(undefined)
+  await clock.advance(10 * 60 * 1000)
+  expect(w.rings()).toBe(1)
+})

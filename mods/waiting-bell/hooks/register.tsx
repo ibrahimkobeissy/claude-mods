@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { Waiting } from '../types'
+import type { Waiting, WaitingKind } from '../types'
 
 const REPEAT_MS = 5 * 60 * 1000
 // After each ring the terminal banner flashes this many times, this fast.
@@ -13,6 +13,10 @@ const OVERLAY_MS = 15_000
 const ASKING_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode'])
 // Notification types the engine raises when a dialog is waiting on the person.
 const WAITING_NOTIFICATIONS = new Set(['permission_prompt', 'elicitation_dialog'])
+// Prompts the person sends; every other origin is the session waking itself.
+const PERSON = new Set(['composer', 'bridge'])
+// Agents still at work will wake the main session again when they finish.
+const BUSY_AGENTS = new Set(['pending', 'running'])
 
 const waiting = atom({ plugin: 'waiting-bell', key: 'waiting' } as const, null)
 
@@ -126,68 +130,95 @@ async function ring($: EngineInterface, reason: string) {
   })
 }
 
-async function start($: EngineInterface, reason: string) {
+async function start($: EngineInterface, kind: WaitingKind, reason: string, agentId?: string) {
   repeat?.cancel()
   const since = await $.clock.now()
-  await update($, waiting, (): Waiting => ({ reason, since, rings: 1, isFlashOn: true }))
+  await update($, waiting, (): Waiting => ({ kind, reason, since, rings: 1, isFlashOn: true, isPaused: false, agentId }))
   await ring($, reason)
+  keepRinging($, reason)
+}
+
+function keepRinging($: EngineInterface, reason: string) {
+  repeat?.cancel()
   repeat = $.clock.every(REPEAT_MS, () => {
     void update($, waiting, w => (w ? { ...w, rings: w.rings + 1, isFlashOn: true } : w))
     void ring($, reason)
   })
 }
 
-async function stop($: EngineInterface) {
+function quiet($: EngineInterface) {
   repeat?.cancel()
   repeat = undefined
   flashing?.cancel()
   flashing = undefined
   $.ui.status(undefined)
+}
+
+async function stop($: EngineInterface) {
+  quiet($)
   await update($, waiting, () => null)
 }
 
+// The session works on a background task's notice: silent until that turn ends.
+async function pause($: EngineInterface) {
+  quiet($)
+  await update($, waiting, w => (w ? { ...w, isPaused: true, isFlashOn: false } : w))
+}
+
+async function hasBusyAgents($: EngineInterface) {
+  const list = await $.agent.list().catch(() => [])
+  return list.some(a => BUSY_AGENTS.has(a.status))
+}
+
 export const register: Register = on => {
-  // The answer has come: the person typed, or a new turn began.
+  // The person typed: whatever was waiting has its answer. A prompt from a
+  // background task's notice or a schedule is the session going back to work.
   on('prompt.submit', async ($, e, next) => {
-    await stop($)
-    return next(e)
-  })
-  on('turn.start', async ($, e, next) => {
-    await stop($)
+    if (PERSON.has(e.origin.kind)) await stop($)
+    else await pause($)
     return next(e)
   })
 
-  // The main loop finished its turn and now waits for the next prompt.
+  // The main session finished its turn. It is the person's turn only when
+  // nothing it started is still running; a finished agent wakes it again.
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
-    if (e.agentId === undefined && e.reason !== 'aborted') {
-      await start($, e.reason === 'answer' ? 'your turn' : `turn ended (${e.reason})`)
+    if (e.agentId !== undefined || e.reason === 'aborted') return result
+    if (await hasBusyAgents($)) return result
+    const w = await read($, waiting)
+    if (w?.kind === 'turn') {
+      // Already waiting on the person since before a notice woke the session.
+      await update($, waiting, x => (x ? { ...x, isPaused: false } : x))
+      keepRinging($, w.reason)
+      return result
     }
+    await start($, 'turn', e.reason === 'answer' ? 'your turn' : `turn ended (${e.reason})`)
     return result
   })
 
   // A permission dialog or MCP elicitation is up.
   on('classic.Notification', async ($, e, next) => {
     if (WAITING_NOTIFICATIONS.has(e.notification_type)) {
-      await start($, e.message || 'permission needed')
+      await start($, 'dialog', e.message || 'permission needed', e.agent_id)
     }
     return next(e)
   })
 
-  // A question or plan approval waits while the tool runs; any tool finishing
-  // after a permission prompt means it was answered.
+  // A question or plan approval waits while the tool runs. A dialog is
+  // answered once a tool in the same loop finishes; a turn's wait is not.
   on('tool.call', async ($, e, next) => {
     if (ASKING_TOOLS.has(e.tool)) {
-      await start($, e.tool === 'ExitPlanMode' ? 'plan approval' : 'a question for you')
+      await start($, 'dialog', e.tool === 'ExitPlanMode' ? 'plan approval' : 'a question for you', e.agentId)
     }
     const result = await next(e)
-    if ((await read($, waiting)) !== null) await stop($)
+    const w = await read($, waiting)
+    if (w?.kind === 'dialog' && w.agentId === e.agentId) await stop($)
     return result
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const w = await read($, waiting)
-    if (w === null || e.props.hasSurvey || e.props.isWorking) return next(e)
+    if (w === null || w.isPaused || e.props.hasSurvey || e.props.isWorking) return next(e)
 
     const { Box, Text, Button } = $.ui.resolve(e)
     const at = new Date(w.since).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
