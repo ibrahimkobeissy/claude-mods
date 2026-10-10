@@ -24,7 +24,7 @@ Each part of the session gets its own colour-coded box:
 | **⚠ Needs you** (yellow) | Shown while a permission prompt, a question or a plan approval is waiting, with who it's from and for how long |
 | **Main** (orange) | Model, effort, context gauge (turns yellow, then red with "compaction soon"), 5-hour and 7-day limits with reset times, **when the 5h window fills at your current pace**, the folder the session runs in, and your git branch or worktree |
 | **Agents** (lavender) | One card per subagent: task, type, context, tool calls, errors, branch or worktree, and running time. Select a card to see its last message |
-| **Background** (green) | The background shells the footer counts, running ones first, plus scheduled cron jobs and `/loop` wakeups. Select a shell to open its live output |
+| **Background** (green) | The background shells and monitors the footer counts (`1 shell · 4 monitors`), running ones first, including those subagents started, plus scheduled cron jobs and `/loop` wakeups. Select one to open its live output |
 | **Progress** (purple) | The task list and the approved plan, shown only when there is one |
 
 You also get a toast when a background shell or agent finishes or fails.
