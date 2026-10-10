@@ -609,8 +609,9 @@ export const register: Register = (on, options) => {
     const running = agentRows.filter(a => !ENDED.has(a.status)).sort((a, b) => a.startedAt - b.startedAt)
     const done = agentRows.filter(a => ENDED.has(a.status)).sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))
     const shown = [...running, ...done.slice(0, Math.max(0, MAX_CARDS - running.length))]
-    const cols = W >= 66 ? 3 : W >= 44 ? 2 : 1
-    const cardW = Math.floor((W - (cols - 1)) / cols)
+    // Cards sit inside the agents box, so they share its inner width.
+    const cols = IN >= 62 ? 3 : IN >= 40 ? 2 : 1
+    const cardW = Math.floor((IN - (cols - 1)) / cols)
     const cardIn = cardW - 4
     const card = (a: AgentRow, index: number) => {
       const isEnded = ENDED.has(a.status)
@@ -723,25 +724,19 @@ export const register: Register = (on, options) => {
         {box('main', C.main, `${model} · main`, '', mainBody)}
 
         {joint('j-agents', C.main)}
-        <Box justifyContent="space-between" width={W}>
-          <Box>
-            <Button key="fold-agents" plain dimColor label={isFolded('agents') ? '▸ ' : '▾ '} onPress={toggle('agents')} />
-            <Text bold>{'agents'}</Text>
-            <Text dimColor>{agentRows.length ? ` · ${running.length} running · ${agentRows.length} total` : ' · none yet'}</Text>
-          </Box>
-          {shown.length ? <Text dimColor>{'⏎ details'}</Text> : null}
-        </Box>
-        {!isFolded('agents') && shown.length ? (
+        {box('agents', C.agents, 'AGENTS', agentRows.length ? `${running.length} running · ${agentRows.length} total` : '', (
           <Box flexDirection="column">
-            {joint('j-cards-top', C.agents, cols)}
-            <Box flexDirection="row" flexWrap="wrap" columnGap={1} width={W}>
-              {shown.map(card)}
-            </Box>
-            {agentRows.length > shown.length ? <Text dimColor>{`  + ${agentRows.length - shown.length} more done`}</Text> : null}
-            {joint('j-cards-bottom', C.agents, cols)}
+            {shown.length === 0 ? <Text dimColor>none yet</Text> : null}
+            {shown.length ? (
+              <Box flexDirection="row" flexWrap="wrap" columnGap={1} width={IN}>
+                {shown.map(card)}
+              </Box>
+            ) : null}
+            {agentRows.length > shown.length ? <Text dimColor>{`+ ${agentRows.length - shown.length} more done`}</Text> : null}
           </Box>
-        ) : null}
+        ))}
 
+        {joint('j-background', C.agents)}
         {box('background', C.shells, 'BACKGROUND · shells', liveShells.length ? `${liveShells.length} running` : '', bgBody)}
         {items.length || prog.plan ? joint('j-progress', C.shells) : null}
         {items.length || prog.plan ? box('progress', C.progress, 'PROGRESS', items.length ? `${finished}/${items.length}` : '', progBody) : null}

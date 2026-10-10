@@ -229,15 +229,15 @@ test('agents are listed with their tool calls, context and last words', async ($
   await $.tool.call({ tool: 'Read', file_path: '/b', agentId: 'ag1' } as Parameters<typeof $.tool.call>[0])
   for await (const _ of $.turn.step({ turnId: 't', index: 0, model: 'claude-haiku-4-5', messageCount: 3, agentId: 'ag1' })) void _
 
-  const ui = await $.ui.mount({ ...PANE(80), surface: 'terminal' })
+  const ui = await $.ui.mount({ ...PANE(96), surface: 'terminal' })
   expect(await ui.find({ key: 'agent-ag1', text: /1: find test fixtures/ })).toBeDefined()
   expect(await ui.find({ text: 'Explore' })).toBeDefined()
   expect(await ui.find({ text: /ctx 62k · 2 tools/ })).toBeDefined()
-  expect(await ui.find({ text: /1 running · 1 total/ })).toBeDefined()
+  expect(await ui.find({ text: '1 running · 1 total' })).toBeDefined()
 
   await $.session.receive(notice('ag1', 'completed', 'Agent "find test fixtures" completed'))
   expect(w.toasts.at(-1)).toBe('✓ agent completed: find test fixtures')
-  expect(await ui.find({ text: /0 running · 1 total/ })).toBeDefined()
+  expect(await ui.find({ text: '0 running · 1 total' })).toBeDefined()
 
   // Done agents fold to one line; pressing one shows its last words.
   expect(await ui.find({ text: /Found 4 fixture dirs/ })).toBeUndefined()
@@ -317,4 +317,12 @@ test('the main box shows where the session runs', async ($, on) => {
 
   const ui = await $.ui.mount({ ...PANE(), surface: 'terminal' })
   expect(await ui.find({ text: /dir +~\/app/ })).toBeDefined()
+})
+
+test('agents get their own box, even with none yet', async ($, on) => {
+  world(on)
+  const ui = await $.ui.mount({ ...PANE(), surface: 'terminal' })
+  expect(await ui.find({ text: 'AGENTS' })).toBeDefined()
+  expect(await ui.find({ text: 'none yet' })).toBeDefined()
+  expect(await ui.find({ key: 'fold-agents' })).toBeDefined()
 })
