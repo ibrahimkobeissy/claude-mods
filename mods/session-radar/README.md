@@ -13,7 +13,7 @@
 /plugin install session-radar@claude-mods
 ```
 
-Then type `/radar` to open it, and `/radar` again to close it.
+It opens by itself when a session starts, wherever it fits as a sidebar. `/radar` opens or closes it at any time.
 
 ## What it shows
 
@@ -56,7 +56,7 @@ You can also click rows.
 
 | Option | Default | |
 | --- | --- | --- |
-| `autoOpen` | `false` | Open the radar when a session starts. When opened this way it only appears where it fits as a sidebar (144+ columns) |
+| `autoOpen` | `true` | Open the radar when a session starts. When opened this way it only appears where it fits as a sidebar (144+ columns); in a narrower terminal, type `/radar` |
 
 Set it from `/plugin` → session-radar → configure.
 
