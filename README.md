@@ -74,7 +74,9 @@ Update later with `claude plugin update <mod-name>@claude-mods`, then `/reload-p
 
 | Mod | What it does | Install |
 | --- | --- | --- |
-| _Coming soon_ | The first mods are on their way. [Suggest one →](https://github.com/ibrahimkobeissy/claude-mods/issues/new?template=mod_request.yml) | |
+| 🔔 [`waiting-bell`](mods/waiting-bell) | Rings, notifies and flashes a banner whenever Claude is waiting for you; repeats every 5 min until you answer | `/plugin install waiting-bell@claude-mods` |
+
+Have an idea? [Suggest a mod →](https://github.com/ibrahimkobeissy/claude-mods/issues/new?template=mod_request.yml)
 
 <!-- Add a row per mod, in alphabetical order:
 | [`mod-name`](mods/mod-name) | One line on what it does | `/plugin install mod-name@claude-mods` |
@@ -90,7 +92,7 @@ mods/my-mod/
 └── hooks/
     ├── hooks.json               # { "modules": ["./register.ts"] }
     ├── register.ts              # export const register: Register = (on, options) => { ... }
-    └── register.test.ts         # tests, run by `claude plugin test`
+    └── register.test.ts         # tests (any *.test.ts), run by `claude plugin test`
 ```
 
 **1. Scaffold** from the starter in [`template/`](template):

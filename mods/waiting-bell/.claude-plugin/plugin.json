@@ -1,0 +1,11 @@
+{
+  "name": "waiting-bell",
+  "version": "0.1.0",
+  "description": "Rings a bell and shows a banner whenever Claude is blocked waiting for you, repeating every 5 minutes until you answer",
+  "author": { "name": "Ibrahim Kobeissy", "url": "https://github.com/ibrahimkobeissy" },
+  "homepage": "https://github.com/ibrahimkobeissy/claude-mods/tree/main/mods/waiting-bell",
+  "repository": "https://github.com/ibrahimkobeissy/claude-mods",
+  "license": "MIT",
+  "keywords": ["notification", "bell", "sound", "alert", "permission", "idle"],
+  "types": "./types/index.d.ts"
+}

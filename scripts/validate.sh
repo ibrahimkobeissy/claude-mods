@@ -28,7 +28,7 @@ for dir in "${targets[@]}"; do
   [[ -f "$dir/.claude-plugin/plugin.json" ]] || continue
   echo "── ${dir%/}"
   claude plugin validate "$dir" || status=1
-  if compgen -G "$dir/hooks/*.test.ts" >/dev/null; then
+  if find "$dir" -name '*.test.ts' -not -path '*/.claude-plugin/types/*' | grep -q .; then
     claude plugin test "$dir" || status=1
   fi
 done
