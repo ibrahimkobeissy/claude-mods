@@ -23,7 +23,13 @@
 | It asked you a question (`AskUserQuestion`) | `a question for you` |
 | It wants a plan approved (`ExitPlanMode`) | `plan approval` |
 
-It stays quiet for subagent turns and for turns you interrupted. It stops as soon as you send a prompt, a new turn starts, a waiting tool finishes, or you press **Silence** on the banner.
+It rings only when the main session is really waiting on you:
+
+- **Not while background agents are still running.** When they finish, the main session is woken to handle them, so it isn't your turn yet.
+- **Not for a finished background shell or agent.** The session handles the notice by itself. If you were already being called, that same wait carries on afterwards without ringing again.
+- **Not for subagent turns or turns you interrupted.**
+
+A "your turn" wait ends when you send a prompt or press **Silence**. A permission prompt, question or plan approval ends as soon as it's answered.
 
 ## What each ring does
 
