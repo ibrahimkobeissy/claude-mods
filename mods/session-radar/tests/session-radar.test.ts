@@ -346,3 +346,23 @@ for (const [name, stdout, label] of [
     expect(await ui.find({ text: label })).toBeDefined()
   })
 }
+
+test('opens on start by default', async ($, on) => {
+  const w = world(on)
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200_000 }, rateLimits: [] } }))
+  on('command.register', () => ({ value: { command: 'radar' } }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/home/me/app', surface: 'terminal', isInteractive: true })
+  expect(w.opened).toEqual(['session-radar'])
+})
+
+test('autoOpen off keeps the pane closed on start', { options: { autoOpen: false } }, async ($, on) => {
+  const w = world(on)
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200_000 }, rateLimits: [] } }))
+  on('command.register', () => ({ value: { command: 'radar' } }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/home/me/app', surface: 'terminal', isInteractive: true })
+  expect(w.opened).toEqual([])
+})
