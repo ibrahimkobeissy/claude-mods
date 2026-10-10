@@ -8,6 +8,10 @@ A public Claude Code **plugin marketplace** of "mods": plugins built from functi
 
 For the hooks API itself, load the built-in `plugin-authoring` skill; it points at this build's exact type definitions (`claude-code.d.ts`). Don't guess API shapes — grep those types.
 
+## Branch and release rule
+
+This is a public repo. Every new mod is built on its own branch (`git switch -c mod/<name>`) and committed there only. Never push the branch, open a PR, or merge into `main` until the maintainer explicitly says so. They test each mod by hand before it ships. When a mod is ready, run `scripts/validate.sh mods/<name>` and give the steps to try it (`claude --plugin-dir mods/<name>`), then stop.
+
 ## Commands
 
 ```bash
