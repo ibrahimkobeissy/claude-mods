@@ -1,0 +1,41 @@
+name: Bug report
+description: A mod doesn't behave as described.
+labels: [bug]
+body:
+  - type: input
+    id: mod
+    attributes:
+      label: Mod
+      description: Name and version, e.g. `env-guard@0.1.0`
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Claude Code version
+      description: Output of `claude --version`
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options: [Terminal, Desktop app, VS Code, Other]
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Any dim `<mod>: ...` line from the transcript, or the relevant lines of `claude --debug`.
+      render: text

@@ -1,0 +1,12 @@
+{
+  "name": "claude-mods",
+  "owner": {
+    "name": "Ibrahim Kobeissy",
+    "url": "https://github.com/ibrahimkobeissy"
+  },
+  "metadata": {
+    "description": "Open-source mods for Claude Code: panes, status lines, toasts, tool guards and slash commands.",
+    "version": "0.1.0"
+  },
+  "plugins": []
+}

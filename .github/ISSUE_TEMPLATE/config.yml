@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security report
+    url: https://github.com/ibrahimkobeissy/claude-mods/security/advisories/new
+    about: Report a malicious or unsafe mod privately.
+  - name: Claude Code itself
+    url: https://github.com/anthropics/claude-code/issues
+    about: Bugs in Claude Code (not in a mod) belong upstream.

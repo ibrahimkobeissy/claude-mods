@@ -1,0 +1,7 @@
+{
+  "name": "mod-template",
+  "version": "0.1.0",
+  "description": "Starter mod: blocks edits to .env files. Copy me with scripts/new-mod.sh.",
+  "author": { "name": "Ibrahim Kobeissy", "url": "https://github.com/ibrahimkobeissy" },
+  "license": "MIT"
+}

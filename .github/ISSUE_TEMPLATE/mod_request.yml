@@ -1,0 +1,28 @@
+name: Mod request
+description: Suggest a new mod.
+labels: [mod request]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What should the mod do?
+      description: The behaviour you want in your Claude Code session.
+    validations:
+      required: true
+  - type: checkboxes
+    id: kind
+    attributes:
+      label: What kind of mod is it?
+      options:
+        - label: Pane / panel / band
+        - label: Status line or toast
+        - label: Tool guard or rewrite
+        - label: Slash command
+        - label: Prompt or system-prompt change
+        - label: Something else
+  - type: checkboxes
+    id: build
+    attributes:
+      label: Contribution
+      options:
+        - label: I'd like to build this myself

@@ -1,0 +1,8 @@
+# Types Claude Code lays into a mod folder when it loads it
+.claude-plugin/types/
+**/.claude-plugin/types/
+
+node_modules/
+.DS_Store
+*.log
+.claude/settings.local.json
