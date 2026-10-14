@@ -56,7 +56,16 @@ export type Progress = { todos: ProgressItem[]; tasks: ProgressItem[]; plan?: st
 
 export type Needs = { who: string; agentId?: string; what: string; since: number }
 
-export type View = { screen: 'overview' | 'shell'; shellId?: string; expanded?: string; folded: string[] }
+// A list shown whole ('mcp', 'skills') rather than cut to its first lines.
+export type View = { screen: 'overview' | 'shell'; shellId?: string; expanded?: string; folded: string[]; unrolled?: string[] }
+
+export type McpServer = { name: string; tools: number }
+
+// What the session has: its MCP servers (each tool's wire name → its server) and its skills.
+export type Catalog = { servers: McpServer[]; toolServer: Record<string, string>; skills: string[] }
+
+// Something in use right now: an MCP call until it returns, a skill until its agent's turn ends.
+export type InUse = { id: string; kind: 'mcp' | 'skill'; name: string; tool?: string; agentId?: string; startedAt: number }
 
 export type Output = { shellId: string; lines: string[]; at: number; error?: string }
 
@@ -73,6 +82,8 @@ declare module 'claude-code' {
       needs: Needs | null
       view: View
       output: Output | null
+      catalog: Catalog
+      inUse: Record<string, InUse>
       tick: number
     }
   }

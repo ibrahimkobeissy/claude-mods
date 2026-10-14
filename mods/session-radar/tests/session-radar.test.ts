@@ -444,3 +444,116 @@ test('the header shows the radar\'s version', async ($, on) => {
   const ui = await $.ui.mount({ ...PANE(), surface: 'terminal' })
   expect(await ui.find({ text: ' · v9.9.9' })).toBeDefined()
 })
+
+// A session whose context has these MCP tools and skills; `start` starts it.
+function startWith(on: On, mcpTools: [string, string][], skills: string[]) {
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.usage', (_$, e) => ({
+    value: {
+      startedAt: 0, rateLimits: [],
+      context: {
+        window: 200_000,
+        breakdown: e.breakdown ? {
+          mcpTools: mcpTools.map(([name, serverName]) => ({ name, serverName, tokens: 10, isLoaded: true })),
+          skills: { totalSkills: skills.length, includedSkills: skills.length, tokens: 10, skillFrontmatter: skills.map(name => ({ name, source: 'plugin', tokens: 5 })) },
+        } : undefined,
+      },
+    },
+  }) as never)
+  on('command.register', () => ({ value: { command: 'radar' } }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  return ($: { session: { start: (e: { cwd: string; surface: 'terminal'; isInteractive: boolean }) => Promise<unknown> } }) =>
+    $.session.start({ cwd: '/home/me/app', surface: 'terminal', isInteractive: true })
+}
+
+const TOOLS: [string, string][] = [
+  ['mcp__sentry__search_issues', 'sentry'], ['mcp__sentry__search_logs', 'sentry'], ['mcp__claude_ai_Gmail__create_draft', 'claude.ai Gmail'],
+]
+
+test('MCP servers are listed, and one shows as in use only while its call runs', async ($, on) => {
+  world(on)
+  const start = startWith(on, TOOLS, [])
+  let during: string | undefined
+  let ui: Awaited<ReturnType<typeof $.ui.mount>> | undefined
+  on('tool.call', { tool: 'mcp__sentry__search_issues' }, async () => {
+    during = (await ui?.find({ text: /sentry · search_issues/ }))?.text
+    return { result: { content: [] } } as never
+  })
+  await start($)
+  ui = await $.ui.mount({ ...PANE(), surface: 'terminal' })
+
+  expect(await ui.find({ text: /sentry \(2\)/ })).toBeDefined()
+  expect(await ui.find({ text: /claude\.ai Gmail \(1\)/ })).toBeDefined()
+  expect(await ui.find({ text: '0 in use · 2 servers' })).toBeDefined()
+
+  await $.tool.call({ tool: 'mcp__sentry__search_issues', query: 'x' } as never)
+  expect(during).toContain('● sentry · search_issues')
+  expect(await ui.find({ text: /sentry · search_issues/ })).toBeUndefined()
+  expect(await ui.find({ text: '0 in use · 2 servers' })).toBeDefined()
+})
+
+test('a long MCP list shows two rows and unrolls', async ($, on) => {
+  world(on)
+  const many = Array.from({ length: 12 }, (_, i): [string, string] => [`mcp__server${i}__t`, `server-${String(i).padStart(2, '0')}`])
+  await startWith(on, many, [])($)
+  const ui = await $.ui.mount({ ...PANE(46, true), surface: 'terminal' })
+  const more = await ui.find({ key: 'more-mcp' })
+  expect(more?.text).toMatch(/^\+ \d+ more$/)
+  expect(await ui.find({ text: /server-11/ })).toBeUndefined()
+  await ui.press({ key: 'more-mcp' })
+  expect(await ui.find({ text: /server-11/ })).toBeDefined()
+})
+
+test('a skill shows on the agent that called it until that agent ends', async ($, on) => {
+  world(on)
+  const start = startWith(on, [], ['code-review', 'simplify', 'pdf'])
+  on('agent.spawn', () => ({ model: 'claude-haiku-4-5', agentId: 'ag1' }))
+  on('skill.prompt', (_$, e) => ({ text: e.text }))
+  // The engine expands the skill's prompt while the Skill call runs.
+  on('tool.call', { tool: 'Skill' }, async (_$, e) => {
+    await $.skill.prompt({ skill: e.skill, text: 'review' })
+    return { result: { success: true, commandName: e.skill } } as never
+  })
+  await start($)
+  await $.agent.spawn(SPAWN)
+  await $.tool.call({ tool: 'Skill', skill: 'code-review', agentId: 'ag1' } as Parameters<typeof $.tool.call>[0])
+
+  const ui = await $.ui.mount({ ...PANE(96, true), surface: 'terminal' })
+  expect(await ui.find({ text: '⚡ code-review' })).toBeDefined()
+  expect(await ui.find({ text: /agent 1/ })).toBeDefined()
+  expect(await ui.find({ text: '1 in use' })).toBeDefined()
+
+  await ui.press({ key: 'more-skills' })
+  expect(await ui.find({ text: /● code-review · pdf · simplify/ })).toBeDefined()
+
+  await $.session.receive(notice('ag1', 'completed', 'Agent done'))
+  expect(await ui.find({ text: '⚡ code-review' })).toBeUndefined()
+  expect(await ui.find({ text: 'none in use' })).toBeDefined()
+})
+
+test('a skill typed by the person is in use until the turn stops', async ($, on) => {
+  world(on)
+  const start = startWith(on, [], ['simplify'])
+  on('skill.prompt', (_$, e) => ({ text: e.text }))
+  await start($)
+  await $.skill.prompt({ skill: 'simplify', text: 'go' })
+
+  const ui = await $.ui.mount({ ...PANE(), surface: 'terminal' })
+  expect(await ui.find({ text: '+ 1 available' })).toBeDefined()
+  expect(await ui.find({ text: /⚡ simplify/ })).toBeDefined()
+  expect(await ui.find({ text: /main/ })).toBeDefined()
+
+  await $.classic.Stop({ hook_event_name: 'Stop', stop_hook_active: false } as never)
+  expect(await ui.find({ text: /⚡ simplify/ })).toBeUndefined()
+})
+
+test('at most four agent cards show', async ($, on) => {
+  world(on)
+  let n = 0
+  on('agent.spawn', () => ({ model: 'claude-haiku-4-5', agentId: `ag${++n}` }))
+  for (let i = 0; i < 6; i++) await $.agent.spawn({ ...SPAWN, tool_use_id: `tu${i}`, description: `job ${i}` })
+  const ui = await $.ui.mount({ ...PANE(96), surface: 'terminal' })
+  expect(await ui.find({ key: 'agent-ag6' })).toBeDefined()
+  expect(await ui.find({ key: 'agent-ag2' })).toBeUndefined()
+  expect(await ui.find({ text: '+ 2 more running' })).toBeDefined()
+})
