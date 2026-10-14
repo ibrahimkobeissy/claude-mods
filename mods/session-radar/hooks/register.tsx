@@ -41,6 +41,8 @@ const tick = atom({ plugin: 'session-radar', key: 'tick' } as const, 0)
 let ticker: Timer | undefined
 let outputTimer: Timer | undefined
 let ticks = 0
+// The radar's own version, from its plugin.json; '' when it cannot be read.
+let version: string | undefined
 // Agent tool calls that asked for a worktree, until agent.spawn names the agent.
 const worktreeCalls = new Set<string>()
 const branchOf = new Map<string, { branch?: string; isWorktree: boolean }>()
@@ -240,6 +242,16 @@ async function applyNotice($: EngineInterface, notice: TaskNotice) {
     const status: AgentStatusName = notice.status
     await patchAgent($, notice.id, a => ({ ...a, status, endedAt: now }))
     await announceAgentEnd($, agent, status, now)
+  }
+}
+
+async function readVersion($: EngineInterface) {
+  const text = await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`).catch(() => '')
+  try {
+    const v = (JSON.parse(text) as { version?: unknown }).version
+    return typeof v === 'string' ? v : ''
+  } catch {
+    return ''
   }
 }
 
@@ -521,6 +533,7 @@ export const register: Register = (on, options) => {
     const v = await read($, view)
     await read($, tick)
     const now = await $.clock.now()
+    version ??= await readVersion($)
 
     const toggle = (section: string) => () =>
       void update($, view, x => ({
@@ -770,6 +783,7 @@ export const register: Register = (on, options) => {
         <Box justifyContent="center" width={W}>
           <Text bold>{'RADAR · '}</Text>
           <Text color={C.main} bold>{model}</Text>
+          {version ? <Text dimColor>{` · v${version}`}</Text> : null}
         </Box>
         <Box justifyContent="center" width={W} gap={2}>
           <Text><Text color={C.main}>■</Text><Text dimColor> main</Text></Text>
