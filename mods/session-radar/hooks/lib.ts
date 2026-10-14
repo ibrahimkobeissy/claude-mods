@@ -166,3 +166,28 @@ export function shortPath(path: string, home: string | undefined, width: number)
   const tilde = home && (path === home || path.startsWith(`${home}/`)) ? `~${path.slice(home.length)}` : path
   return tilde.length > width ? `…${tilde.slice(tilde.length - width + 1)}` : tilde
 }
+
+// "mcp__claude_ai_Gmail__create_draft" → { server: "claude_ai_Gmail", tool: "create_draft" }.
+export function mcpParts(name: string) {
+  if (!name.startsWith('mcp__')) return undefined
+  const rest = name.slice(5)
+  const cut = rest.indexOf('__')
+  return cut < 0 ? { server: rest, tool: '' } : { server: rest.slice(0, cut), tool: rest.slice(cut + 2) }
+}
+
+// Lays words into rows of `width`, `gap` apart; a word too wide gets a row of its own.
+export function pack(words: readonly string[], width: number, gap: number) {
+  const rows: number[][] = []
+  let used = 0
+  words.forEach((w, i) => {
+    const row = rows.at(-1)
+    if (row && used + gap + w.length <= width) {
+      row.push(i)
+      used += gap + w.length
+    } else {
+      rows.push([i])
+      used = w.length
+    }
+  })
+  return rows
+}

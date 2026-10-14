@@ -1,6 +1,6 @@
 # 📡 session-radar
 
-**A live sidebar for long Claude Code sessions.** Usage limits, context, agents, background shells and progress, all in one small pane next to your transcript. It changes none of Claude Code's own behaviour.
+**A live sidebar for long Claude Code sessions.** Usage limits, context, agents, MCP servers, skills, background shells and progress, all in one small pane next to your transcript. It changes none of Claude Code's own behaviour.
 
 <p align="center">
   <img src="assets/overview.png" alt="session-radar docked beside a real Claude Code session with four agents and two background shells" width="100%">
@@ -23,7 +23,9 @@ Each part of the session gets its own colour-coded box:
 | --- | --- |
 | **⚠ Needs you** (yellow) | Shown while a permission prompt, a question or a plan approval is waiting, with who it's from and for how long |
 | **Main** (orange) | Model, effort, context gauge (turns yellow, then red with "compaction soon"), 5-hour and 7-day limits with reset times, **when the 5h window fills at your current pace**, the folder the session runs in, and your git branch or worktree |
-| **Agents** (lavender) | One card per subagent: task, type, context, tool calls, errors, branch or worktree, and running time. Select a card to see its last message |
+| **Agents** (lavender) | Up to four cards, one per subagent: task, type, context, tool calls, errors, branch or worktree, running time, and the MCP server or skill it is using right now. Select a card to see its last message |
+| **MCP** (sky) | Every connected MCP server with its tool count, in two rows (`+ N more` shows the rest). A server lights up while one of its tools is being called, with the tool and who called it |
+| **Skills** (pink) | The skills in use right now, by main or by agent. A skill counts as in use from when it is invoked until that agent's turn ends, so when Claude is idle nothing is lit. `+ N available` lists every skill, the ones in use highlighted |
 | **Background** (green) | The background shells and monitors the footer counts (`1 shell · 4 monitors`), running ones first, including those subagents started, plus scheduled cron jobs and `/loop` wakeups. Select one to open its live output |
 | **Progress** (purple) | The task list and the approved plan, shown only when there is one |
 

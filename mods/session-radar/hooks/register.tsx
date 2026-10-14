@@ -1,10 +1,10 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { AgentRow, AgentStatusName, Cron, Main, ProgressItem, ShellRow, Usage, View } from '../types'
+import type { AgentRow, AgentStatusName, Catalog, Cron, InUse, Main, ProgressItem, ShellRow, Usage, View } from '../types'
 import {
   addSamples, clip, clock, connector, duration, effortMeter, gauge, modelName, shortPath, stopwatch, exitCodeOf, forecast, lastLine, limitLabel,
-  outputPathOf, parentDir, parseTaskNotice, resetLabel, tail, tokens,
+  mcpParts, outputPathOf, pack, parentDir, parseTaskNotice, resetLabel, tail, tokens,
 } from './lib'
 import type { TaskNotice } from './lib'
 
@@ -15,10 +15,13 @@ const OUTPUT_MS = 2000
 // Branches are read with git, so not on every tick.
 const BRANCH_EVERY_TICKS = 6
 const MAX_OUTPUT_LINES = 200
-const MAX_CARDS = 6
+const MAX_CARDS = 4
+// The MCP and skill lists show this many rows until unrolled.
+const LIST_ROWS = 2
+const ACTIVE_ROWS = 3
 const C = {
   main: '#d97757', agents: '#a5b4fc', shells: '#4ade80', progress: '#c084fc',
-  warn: '#facc15', bad: '#f87171', branch: '#7ab7ff',
+  warn: '#facc15', bad: '#f87171', branch: '#7ab7ff', mcp: '#38bdf8', skills: '#f472b6',
 } as const
 const FINISHED_SHELLS_SHOWN = 3
 // Beyond this the newest live tasks show and the rest are counted.
@@ -37,6 +40,8 @@ const needs = atom({ plugin: 'session-radar', key: 'needs' } as const, null)
 const view = atom({ plugin: 'session-radar', key: 'view' } as const, { screen: 'overview', folded: [] })
 const output = atom({ plugin: 'session-radar', key: 'output' } as const, null)
 const tick = atom({ plugin: 'session-radar', key: 'tick' } as const, 0)
+const catalog = atom({ plugin: 'session-radar', key: 'catalog' } as const, { servers: [], toolServer: {}, skills: [] })
+const inUse = atom({ plugin: 'session-radar', key: 'inUse' } as const, {})
 
 let ticker: Timer | undefined
 let outputTimer: Timer | undefined
@@ -46,6 +51,8 @@ let version: string | undefined
 // Agent tool calls that asked for a worktree, until agent.spawn names the agent.
 const worktreeCalls = new Set<string>()
 const branchOf = new Map<string, { branch?: string; isWorktree: boolean }>()
+// Skill tool calls in flight, by skill name: their skill.prompt is already counted.
+const skillCalls = new Map<string, number>()
 
 // ── reading the world ────────────────────────────────────────────────────────
 
@@ -78,6 +85,41 @@ async function saveUsage($: EngineInterface, u: Omit<Usage, 'startedAt'>) {
   const now = await $.clock.now()
   await update($, usage, (old): Usage => ({ startedAt: old?.startedAt ?? now, ...u }))
   await update($, samples, s => addSamples(s, u.rateLimits, now))
+}
+
+// The servers and skills the context lists, estimated locally (no API call).
+async function refreshCatalog($: EngineInterface) {
+  const b = (await $.session.usage({ breakdown: 'summary' }).catch(() => undefined))?.context.breakdown
+  if (!b) return
+  const count = new Map<string, number>()
+  const toolServer: Record<string, string> = {}
+  for (const t of b.mcpTools) {
+    count.set(t.serverName, (count.get(t.serverName) ?? 0) + 1)
+    toolServer[t.name] = t.serverName
+  }
+  const servers = [...count].map(([name, tools]) => ({ name, tools })).sort((x, y) => x.name.localeCompare(y.name))
+  const skills = (b.skills?.skillFrontmatter ?? []).map(s => s.name).sort()
+  await update($, catalog, (): Catalog => ({ servers, toolServer, skills }))
+}
+
+async function startUse($: EngineInterface, use: Omit<InUse, 'startedAt'>) {
+  const startedAt = await $.clock.now()
+  await update($, inUse, all => ({ ...all, [use.id]: { ...use, startedAt } }))
+}
+
+function endUse($: EngineInterface, keep: (x: InUse) => boolean) {
+  return update($, inUse, all => {
+    const gone = Object.values(all).filter(x => !keep(x))
+    if (gone.length === 0) return all
+    const next = { ...all }
+    for (const x of gone) delete next[x.id]
+    return next
+  })
+}
+
+// A loop's turn is over: what it used is no longer in use.
+function endTurn($: EngineInterface, agentId: string | undefined) {
+  return endUse($, x => x.agentId !== agentId)
 }
 
 async function pollAgents($: EngineInterface) {
@@ -114,6 +156,7 @@ async function pollAgents($: EngineInterface) {
 async function announceAgentEnd($: EngineInterface, agent: AgentRow, status: AgentStatusName, now: number) {
   const word = status === 'completed' ? 'completed' : status
   $.ui.toast(`${status === 'completed' ? '✓' : '✗'} agent ${word}: ${clip(agent.description, 40)}`)
+  await endTurn($, agent.id)
   // The engine stops a foreground subagent's background shells with it.
   await update($, shells, all => {
     let next = all
@@ -154,7 +197,10 @@ async function onTick($: EngineInterface) {
   ticks += 1
   await update($, tick, () => ticks)
   await pollAgents($)
-  if (ticks % BRANCH_EVERY_TICKS === 0) await refreshBranches($)
+  if (ticks % BRANCH_EVERY_TICKS === 0) {
+    await refreshBranches($)
+    await refreshCatalog($)
+  }
 }
 
 async function readOutput($: EngineInterface, shell: ShellRow, count: number) {
@@ -275,6 +321,7 @@ export const register: Register = (on, options) => {
     const cwd = await $.session.cwd().catch(() => undefined)
     await update($, main, (m): Main => ({ ...m, cwd: m.cwd ?? cwd }))
     await refreshBranches($)
+    await refreshCatalog($)
     if (options.autoOpen === true) void $.ui.open({ id: PANE, title: 'Radar' })
     return result
   })
@@ -336,15 +383,47 @@ export const register: Register = (on, options) => {
     return result
   })
 
-  // Every tool call: counts per agent, and a question or a dialog answered.
+  // Every tool call: counts per agent, a question or a dialog answered, and an
+  // MCP call in use from its start until it returns.
   on('tool.call', async ($, e, next) => {
     if (e.agentId) await patchAgent($, e.agentId, a => ({ ...a, tools: a.tools + 1 }))
     if (e.tool === 'AskUserQuestion') await setNeeds($, e.agentId, 'a question for you')
     if (e.tool === 'ExitPlanMode') await setNeeds($, e.agentId, 'plan approval')
-    const ran = await next(e)
+    const mcp = mcpParts(e.tool)
+    if (mcp) {
+      const known = (await read($, catalog)).toolServer[e.tool]
+      await startUse($, { id: e.tool_use_id, kind: 'mcp', name: known ?? mcp.server, tool: mcp.tool, agentId: e.agentId })
+    }
+    let ran: Awaited<ReturnType<typeof next>>
+    try {
+      ran = await next(e)
+    } finally {
+      if (mcp) await endUse($, x => x.id !== e.tool_use_id)
+    }
     if (e.agentId && ran.isError === true) await patchAgent($, e.agentId, a => ({ ...a, errors: a.errors + 1 }))
     await clearNeeds($, e.agentId)
     return ran
+  })
+
+  // A skill is in use from its call until the turn of the loop that called it ends.
+  on('tool.call', { tool: 'Skill' }, async ($, e, next) => {
+    skillCalls.set(e.skill, (skillCalls.get(e.skill) ?? 0) + 1)
+    try {
+      const ran = await next(e)
+      if (ran.deny === undefined && ran.isError !== true) await startUse($, { id: e.tool_use_id, kind: 'skill', name: e.skill, agentId: e.agentId })
+      return ran
+    } finally {
+      const left = (skillCalls.get(e.skill) ?? 1) - 1
+      if (left > 0) skillCalls.set(e.skill, left)
+      else skillCalls.delete(e.skill)
+    }
+  })
+
+  // A skill typed as /name expands with no Skill tool call: it runs in the main loop.
+  on('skill.prompt', async ($, e, next) => {
+    const result = await next(e)
+    if (!skillCalls.has(e.skill)) await startUse($, { id: `typed-${e.skill}`, kind: 'skill', name: e.skill })
+    return result
   })
 
   // A background shell: Bash with run_in_background, or one the person backgrounded.
@@ -446,7 +525,11 @@ export const register: Register = (on, options) => {
   on('prompt.submit', async ($, e, next) => {
     if (e.origin.kind === 'task-notification') await applyNotices($, e.text)
     else if (e.origin.kind === 'scheduled-trigger') await update($, crons, list => list.filter(c => c.recurring || (c.id !== WAKEUP && c.prompt.trim() !== e.text.trim())))
-    else await clearNeeds($, null)
+    else {
+      await clearNeeds($, null)
+      // A new prompt: the last turn is over even if it was interrupted before its Stop.
+      await endTurn($, undefined)
+    }
     return next(e)
   })
 
@@ -455,11 +538,13 @@ export const register: Register = (on, options) => {
       await patchAgent($, e.agent_id, a => ({ ...a, lastMessage: lastLine(e.last_assistant_message ?? '') }))
     }
     await reconcileShells($, e.background_tasks)
+    await endTurn($, e.agent_id)
     return next(e)
   })
 
   on('classic.Stop', async ($, e, next) => {
     await reconcileShells($, e.background_tasks)
+    await endTurn($, undefined)
     return next(e)
   })
 
@@ -628,6 +713,8 @@ export const register: Register = (on, options) => {
     const shellRows = Object.values(await read($, shells))
     const cronRows = await read($, crons)
     const prog = await read($, progress)
+    const cat = await read($, catalog)
+    const using = Object.values(await read($, inUse)).sort((a, b) => a.startedAt - b.startedAt)
 
     const model = m.model ? modelName(m.model) : 'claude'
     const home = await $.env.get('HOME').catch(() => undefined)
@@ -689,8 +776,8 @@ export const register: Register = (on, options) => {
     const shown = [...running.slice(-MAX_CARDS), ...done.slice(0, Math.max(0, MAX_CARDS - running.length))]
     const moreRunning = running.length - Math.min(running.length, MAX_CARDS)
     const moreDone = done.length - (shown.length - (running.length - moreRunning))
-    // Cards sit inside the agents box, so they share its inner width.
-    const cols = IN >= 62 ? 3 : IN >= 40 ? 2 : 1
+    // Cards sit inside the agents box, so they share its inner width; four make a 2×2 grid.
+    const cols = IN >= 40 ? 2 : 1
     const cardW = Math.floor((IN - (cols - 1)) / cols)
     const cardIn = cardW - 4
     const card = (a: AgentRow, index: number) => {
@@ -699,6 +786,7 @@ export const register: Register = (on, options) => {
       const isOpen = v.expanded === a.id
       const glyph = isBad ? '✗' : isEnded ? '✓' : a.status === 'waiting' ? '◐' : '◐'
       const glyphColor = isBad ? C.bad : isEnded ? C.shells : a.status === 'waiting' ? C.warn : C.agents
+      const uses = isEnded ? [] : using.filter(x => x.agentId === a.id)
       const facts = [a.contextTokens !== undefined ? `ctx ${tokens(a.contextTokens)}` : '', `${a.tools} tools`].filter(Boolean).join(' · ')
       return (
         <Box key={`card-${a.id}`} flexDirection="column" borderStyle="round" borderColor={C.agents} borderDimColor={isEnded} paddingX={1} width={cardW}>
@@ -708,6 +796,13 @@ export const register: Register = (on, options) => {
             {clip(facts, cardIn)}
             {a.errors > 0 ? <Text color={C.bad}>{` · ${a.errors} err`}</Text> : null}
           </Text>
+          {uses.length ? (
+            <Text wrap="truncate-end">
+              {uses.map((x, i) => (
+                <Text key={`use-${a.id}-${x.id}`} color={x.kind === 'mcp' ? C.mcp : C.skills}>{`${i ? ' ' : ''}${x.kind === 'mcp' ? '●' : '⚡'} ${x.name}`}</Text>
+              ))}
+            </Text>
+          ) : null}
           {a.branch || a.isWorktree ? <Text color={C.branch} wrap="truncate-end">{clip(`⎇ ${a.branch ?? 'worktree'}`, cardIn)}</Text> : null}
           <Text wrap="truncate-end">
             <Text color={glyphColor}>{`${glyph} `}</Text>
@@ -719,6 +814,86 @@ export const register: Register = (on, options) => {
         </Box>
       )
     }
+
+    // MCP and skills: who is using one, and the list of what there is.
+    const cardNo = new Map(shown.map((a, i) => [a.id, i + 1]))
+    const owner = (x: InUse) => {
+      if (!x.agentId) return 'main'
+      const no = cardNo.get(x.agentId)
+      return no ? `agent ${no}` : ((agentRows.find(a => a.id === x.agentId)?.type) ?? 'agent')
+    }
+    const isUnrolled = (list: string) => (v.unrolled ?? []).includes(list)
+    const unroll = (list: string) => () =>
+      void update($, view, x => {
+        const open = x.unrolled ?? []
+        return { ...x, unrolled: open.includes(list) ? open.filter(l => l !== list) : [...open, list] }
+      })
+    // Names laid side by side; the ones in use first and bright, the rest dim.
+    const chips = (list: string, color: string, names: readonly { name: string; label: string }[], active: ReadonlySet<string>, limit: number | undefined) => {
+      const ordered = [...names.filter(n => active.has(n.name)), ...names.filter(n => !active.has(n.name))]
+      const words = ordered.map(n => `${active.has(n.name) ? '● ' : ''}${clip(n.label, IN)}`)
+      const rows = pack(words, IN, 3)
+      const seen = limit === undefined ? rows : rows.slice(0, limit)
+      const hidden = rows.slice(seen.length).reduce((sum, r) => sum + r.length, 0)
+      return {
+        hidden,
+        rows: seen.map((row, r) => (
+          <Text key={`${list}-row-${r}`} wrap="truncate-end">
+            {row.map((i, k) => (
+              <Text key={`${list}-${i}`}>
+                {k ? <Text dimColor>{' · '}</Text> : null}
+                {active.has(ordered[i]!.name) ? <Text color={color} bold>{words[i]}</Text> : <Text dimColor>{words[i]}</Text>}
+              </Text>
+            ))}
+          </Text>
+        )),
+      }
+    }
+    const useRow = (x: InUse, color: string) => {
+      const time = stopwatch(now - x.startedAt)
+      const who = owner(x)
+      const what = x.kind === 'mcp' ? `● ${x.name}${x.tool ? ` · ${x.tool}` : ''}` : `⚡ ${x.name}`
+      return (
+        <Box key={`use-${x.id}`} justifyContent="space-between" width={IN}>
+          <Text color={color} wrap="truncate-end">{clip(what, IN - who.length - time.length - 3)}</Text>
+          <Text dimColor>{`${who} ${time}`}</Text>
+        </Box>
+      )
+    }
+
+    const mcpUses = using.filter(x => x.kind === 'mcp')
+    const mcpActive = new Set(mcpUses.map(x => x.name))
+    const mcpNames = cat.servers.map(sv => ({ name: sv.name, label: `${sv.name} (${sv.tools})` }))
+    // A server the catalog has not caught up with yet still shows while in use.
+    for (const name of mcpActive) if (!cat.servers.some(sv => sv.name === name)) mcpNames.push({ name, label: name })
+    const mcpList = chips('mcp', C.mcp, mcpNames, mcpActive, isUnrolled('mcp') ? undefined : LIST_ROWS)
+    const mcpBody = (
+      <Box flexDirection="column">
+        {mcpNames.length === 0 ? <Text dimColor>no MCP servers connected</Text> : null}
+        {mcpList.rows}
+        {mcpList.hidden > 0 || isUnrolled('mcp') ? (
+          <Button key="more-mcp" plain dimColor label={isUnrolled('mcp') ? '− show less' : `+ ${mcpList.hidden} more`} onPress={unroll('mcp')} />
+        ) : null}
+        {mcpUses.slice(-ACTIVE_ROWS).map(x => useRow(x, C.mcp))}
+        {mcpUses.length > ACTIVE_ROWS ? <Text dimColor>{`+ ${mcpUses.length - ACTIVE_ROWS} more calls`}</Text> : null}
+      </Box>
+    )
+
+    const skillUses = using.filter(x => x.kind === 'skill')
+    const skillActive = new Set(skillUses.map(x => x.name))
+    const skillNames = [...new Set([...cat.skills, ...skillActive])].map(name => ({ name, label: name }))
+    const skillList = chips('skills', C.skills, skillNames, skillActive, undefined)
+    const skillsBody = (
+      <Box flexDirection="column">
+        {skillUses.length === 0 ? <Text dimColor>none in use</Text> : null}
+        {skillUses.slice(-ACTIVE_ROWS).map(x => useRow(x, C.skills))}
+        {skillUses.length > ACTIVE_ROWS ? <Text dimColor>{`+ ${skillUses.length - ACTIVE_ROWS} more`}</Text> : null}
+        {skillNames.length ? (
+          <Button key="more-skills" plain dimColor label={isUnrolled('skills') ? '− hide skills' : `+ ${skillNames.length} available`} onPress={unroll('skills')} />
+        ) : null}
+        {isUnrolled('skills') ? skillList.rows : null}
+      </Box>
+    )
 
     // Background
     const liveShells = shellRows.filter(x => x.status === 'running').sort((a, b) => a.startedAt - b.startedAt)
@@ -785,9 +960,11 @@ export const register: Register = (on, options) => {
           <Text color={C.main} bold>{model}</Text>
           {version ? <Text dimColor>{` · v${version}`}</Text> : null}
         </Box>
-        <Box justifyContent="center" width={W} gap={2}>
+        <Box justifyContent="center" flexWrap="wrap" columnGap={2} width={W}>
           <Text><Text color={C.main}>■</Text><Text dimColor> main</Text></Text>
           <Text><Text color={C.agents}>■</Text><Text dimColor> agents</Text></Text>
+          <Text><Text color={C.mcp}>■</Text><Text dimColor> mcp</Text></Text>
+          <Text><Text color={C.skills}>■</Text><Text dimColor> skills</Text></Text>
           <Text><Text color={C.shells}>■</Text><Text dimColor> shells</Text></Text>
           {items.length || prog.plan ? <Text><Text color={C.progress}>■</Text><Text dimColor> progress</Text></Text> : null}
         </Box>
@@ -818,7 +995,13 @@ export const register: Register = (on, options) => {
           </Box>
         ))}
 
-        {joint('j-background', C.agents)}
+        {joint('j-mcp', C.agents)}
+        {box('mcp', C.mcp, 'MCP', cat.servers.length ? `${mcpActive.size} in use · ${cat.servers.length} servers` : '', mcpBody)}
+
+        {joint('j-skills', C.mcp)}
+        {box('skills', C.skills, 'SKILLS', skillUses.length ? `${skillActive.size} in use` : '', skillsBody)}
+
+        {joint('j-background', C.skills)}
         {box('background', C.shells, 'BACKGROUND', backgroundCount(liveShells), bgBody)}
         {items.length || prog.plan ? joint('j-progress', C.shells) : null}
         {items.length || prog.plan ? box('progress', C.progress, 'PROGRESS', items.length ? `${finished}/${items.length}` : '', progBody) : null}
