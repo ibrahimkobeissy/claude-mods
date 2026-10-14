@@ -53,6 +53,7 @@ function world(on: On, { files = {}, now = 1_000_000, git }: { files?: Record<st
   on('session.measure', (_$, e) => ({ changed: e.changed }))
   on('prompt.submit', (_$, e) => ({ text: e.text }))
   on('classic.Notification', () => ({}))
+  on('classic.Stop', () => ({}))
   return { toasts, opened, clock }
 }
 
@@ -407,4 +408,33 @@ test('a monitor\'s events do not end it; its final notice does', async ($, on) =
 
   await $.session.receive(notice('m2', 'completed', 'Monitor "watch ticks" ended'))
   expect(await ui.find({ text: '1 monitor' })).toBeUndefined()
+})
+
+test('a task the engine no longer lists at Stop is marked done', async ($, on) => {
+  world(on)
+  answerBash(on, 'b11')
+  on('tool.call', { tool: 'Monitor' }, () => ({ result: { taskId: 'm3', timeoutMs: 60_000 } }))
+  await $.tool.call({ tool: 'Bash', ...background('b11', 'npm run dev') })
+  await $.tool.call({ tool: 'Monitor', description: 'wait for verify', timeout_ms: 60_000, command: 'tail -f v' })
+  const ui = await $.ui.mount({ ...PANE(), surface: 'terminal' })
+  expect(await ui.find({ text: '1 shell · 1 monitor' })).toBeDefined()
+
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [{ id: 'b11', type: 'shell', status: 'running', description: 'npm run dev' }] })
+  expect(await ui.find({ text: '1 shell' })).toBeDefined()
+  expect(await ui.find({ text: /monitor/ })).toBeUndefined()
+})
+
+test('many live tasks show the newest and count the rest', async ($, on) => {
+  const w = world(on)
+  let n = 0
+  on('tool.call', { tool: 'Monitor' }, () => ({ result: { taskId: `m${++n}`, timeoutMs: 60_000 } }))
+  for (let i = 1; i <= 12; i++) {
+    await $.tool.call({ tool: 'Monitor', description: `watch ${i}`, timeout_ms: 60_000, command: 'tail -f x' })
+    await w.clock.advance(1000)
+  }
+  const ui = await $.ui.mount({ ...PANE(), surface: 'terminal' })
+  expect(await ui.find({ text: '12 monitors' })).toBeDefined()
+  expect(await ui.find({ text: '+ 4 more running' })).toBeDefined()
+  expect(await ui.find({ key: 'shell-m12' })).toBeDefined()
+  expect(await ui.find({ key: 'shell-m1' })).toBeUndefined()
 })

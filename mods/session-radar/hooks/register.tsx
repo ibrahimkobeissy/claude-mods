@@ -21,6 +21,8 @@ const C = {
   warn: '#facc15', bad: '#f87171', branch: '#7ab7ff',
 } as const
 const FINISHED_SHELLS_SHOWN = 3
+// Beyond this the newest live tasks show and the rest are counted.
+const LIVE_SHELLS_SHOWN = 8
 const ENDED: ReadonlySet<AgentStatusName> = new Set(['completed', 'failed', 'killed'])
 const WAITING_NOTIFICATIONS = new Set(['permission_prompt', 'elicitation_dialog'])
 
@@ -117,6 +119,22 @@ async function announceAgentEnd($: EngineInterface, agent: AgentRow, status: Age
       if (x.agentId === agent.id && x.endsWithAgent && x.status === 'running') {
         next = { ...next, [x.id]: { ...x, status: 'completed', endedAt: now, summary: 'ended with its agent' } }
       }
+    }
+    return next
+  })
+}
+
+// A Stop names every task still in flight, the list the footer counts from: a
+// row it leaves out ended without a notice reaching us (a monitor's timeout, a
+// task stopped with its agent), so it is marked done.
+async function reconcileShells($: EngineInterface, inFlight: readonly { id: string }[] | undefined) {
+  if (!inFlight) return
+  const live = new Set(inFlight.map(t => t.id))
+  const now = await $.clock.now()
+  await update($, shells, all => {
+    let next = all
+    for (const x of Object.values(all)) {
+      if (x.status === 'running' && !live.has(x.id)) next = { ...next, [x.id]: { ...x, status: 'completed', endedAt: now, summary: x.summary ?? 'ended' } }
     }
     return next
   })
@@ -424,6 +442,12 @@ export const register: Register = (on, options) => {
     if (e.last_assistant_message) {
       await patchAgent($, e.agent_id, a => ({ ...a, lastMessage: lastLine(e.last_assistant_message ?? '') }))
     }
+    await reconcileShells($, e.background_tasks)
+    return next(e)
+  })
+
+  on('classic.Stop', async ($, e, next) => {
+    await reconcileShells($, e.background_tasks)
     return next(e)
   })
 
@@ -649,7 +673,9 @@ export const register: Register = (on, options) => {
     // Agents, as cards
     const running = agentRows.filter(a => !ENDED.has(a.status)).sort((a, b) => a.startedAt - b.startedAt)
     const done = agentRows.filter(a => ENDED.has(a.status)).sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))
-    const shown = [...running, ...done.slice(0, Math.max(0, MAX_CARDS - running.length))]
+    const shown = [...running.slice(-MAX_CARDS), ...done.slice(0, Math.max(0, MAX_CARDS - running.length))]
+    const moreRunning = running.length - Math.min(running.length, MAX_CARDS)
+    const moreDone = done.length - (shown.length - (running.length - moreRunning))
     // Cards sit inside the agents box, so they share its inner width.
     const cols = IN >= 62 ? 3 : IN >= 40 ? 2 : 1
     const cardW = Math.floor((IN - (cols - 1)) / cols)
@@ -702,7 +728,8 @@ export const register: Register = (on, options) => {
     const bgBody = (
       <Box flexDirection="column">
         {shellRows.length === 0 && cronRows.length === 0 ? <Text dimColor>nothing in the background</Text> : null}
-        {liveShells.map(shellRow)}
+        {liveShells.slice(-LIVE_SHELLS_SHOWN).map(shellRow)}
+        {liveShells.length > LIVE_SHELLS_SHOWN ? <Text dimColor>{`+ ${liveShells.length - LIVE_SHELLS_SHOWN} more running`}</Text> : null}
         {endedShells.slice(0, FINISHED_SHELLS_SHOWN).map(shellRow)}
         {cronRows.map(c => (
           <Text key={`c-${c.id}`} dimColor wrap="truncate-end">{`↻ ${clip(c.prompt, IN - c.schedule.length - 5)} · ${c.schedule}`}</Text>
@@ -773,7 +800,7 @@ export const register: Register = (on, options) => {
                 {shown.map(card)}
               </Box>
             ) : null}
-            {agentRows.length > shown.length ? <Text dimColor>{`+ ${agentRows.length - shown.length} more done`}</Text> : null}
+            {agentRows.length > shown.length ? <Text dimColor>{`+ ${[moreRunning ? `${moreRunning} more running` : '', moreDone ? `${moreDone} more done` : ''].filter(Boolean).join(' · ')}`}</Text> : null}
           </Box>
         ))}
 
