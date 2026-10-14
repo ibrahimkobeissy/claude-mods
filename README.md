@@ -70,6 +70,19 @@ claude plugin install <mod-name>@claude-mods
 
 Update later with `claude plugin update <mod-name>@claude-mods`, then `/reload-plugins` in a running session.
 
+**Get updates automatically:** auto-update is off by default for community marketplaces, and only you can turn it on. Run `/plugin`, open **Marketplaces → claude-mods** and choose **Enable auto-update**. Or add `"autoUpdate": true` to the `claude-mods` entry under `extraKnownMarketplaces` in `~/.claude/settings.json`:
+
+```json
+"extraKnownMarketplaces": {
+  "claude-mods": {
+    "source": { "source": "github", "repo": "ibrahimkobeissy/claude-mods" },
+    "autoUpdate": true
+  }
+}
+```
+
+Claude Code then updates the marketplace and your installed mods on startup.
+
 ## 🧩 Mods
 
 | Mod | What it does | Install |
