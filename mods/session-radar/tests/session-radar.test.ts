@@ -45,7 +45,7 @@ function world(on: On, { files = {}, now = 1_000_000, git }: { files?: Record<st
     return { value: { kind: 'file', size: text.length, mtimeMs: 0, isLink: false } }
   })
   on('fs.read', (_$, e) => {
-    const text = files[e.path]
+    const text = files[e.path.endsWith('/.claude-plugin/plugin.json') ? 'plugin.json' : e.path]
     if (text === undefined) throw new Error('missing')
     return { value: text }
   })
@@ -437,4 +437,10 @@ test('many live tasks show the newest and count the rest', async ($, on) => {
   expect(await ui.find({ text: '+ 4 more running' })).toBeDefined()
   expect(await ui.find({ key: 'shell-m12' })).toBeDefined()
   expect(await ui.find({ key: 'shell-m1' })).toBeUndefined()
+})
+
+test('the header shows the radar\'s version', async ($, on) => {
+  world(on, { files: { 'plugin.json': '{"name":"session-radar","version":"9.9.9"}' } })
+  const ui = await $.ui.mount({ ...PANE(), surface: 'terminal' })
+  expect(await ui.find({ text: ' · v9.9.9' })).toBeDefined()
 })
