@@ -43,6 +43,9 @@ export type ShellRow = {
   endedAt?: number
   summary?: string
   outputPath?: string
+  // The process the engine started for it, found by its command line.
+  pid?: number
+  exitCode?: number
   agentId?: string
   // Started by a foreground subagent: the engine stops it when that agent ends.
   endsWithAgent?: boolean
