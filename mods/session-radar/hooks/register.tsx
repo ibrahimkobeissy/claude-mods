@@ -3,7 +3,7 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { AgentRow, AgentStatusName, Catalog, Cron, InUse, Main, ProgressItem, ShellRow, Usage, View } from '../types'
 import {
-  addSamples, clip, clock, connector, duration, effortMeter, gauge, modelName, shortPath, stopwatch, exitCodeOf, forecast, lastLine, limitLabel,
+  addSamples, clip, clock, duration, effortMeter, gauge, modelName, shortPath, stopwatch, exitCodeOf, forecast, lastLine, limitLabel,
   mcpParts, outputPathOf, pack, parentDir, parseTaskNotice, resetLabel, tail, tokens,
 } from './lib'
 import type { TaskNotice } from './lib'
@@ -639,19 +639,8 @@ export const register: Register = (on, options) => {
         {isFolded(section) ? null : body}
       </Box>
     )
-    const joint = (key: string, color: string, dots = 2) => {
-      const parts = connector(W, dots)
-      return (
-        <Text key={key} dimColor wrap="truncate-end">
-          {parts.map((part, i) => (
-            <Text key={`${key}-${i}`}>
-              <Text dimColor>{part}</Text>
-              {i < parts.length - 1 ? <Text color={color}>•</Text> : null}
-            </Text>
-          ))}
-        </Text>
-      )
-    }
+    // A blank row between two boxes.
+    const gap = (key: string) => <Box key={key} marginTop={1} />
     const hint = (focused: string) => (
       <Box key="hint" marginTop={1}>
         <Text dimColor>{clip(e.props.isFocused ? focused : 'ctrl+x tab to use · /radar to close', W)}</Text>
@@ -683,7 +672,7 @@ export const register: Register = (on, options) => {
             <Text dimColor>{clip(`${took} · ${shell.kind} · by ${owner} · ${shell.id}`, IN)}</Text>
             {shell.summary ? <Text dimColor>{clip(shell.summary, IN)}</Text> : null}
           </Box>
-          {joint('j-out', C.shells)}
+          {gap('j-out')}
           <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={1} width={W}>
             <Box justifyContent="space-between" width={IN}>
               <Text dimColor>{`output · last ${lines.length} lines`}</Text>
@@ -982,7 +971,7 @@ export const register: Register = (on, options) => {
         <Box marginTop={n ? 0 : 1} />
         {box('main', C.main, `${model} · main`, '', mainBody)}
 
-        {joint('j-agents', C.main)}
+        {gap('j-agents')}
         {box('agents', C.agents, 'AGENTS', agentRows.length ? `${running.length} running · ${agentRows.length} total` : '', (
           <Box flexDirection="column">
             {shown.length === 0 ? <Text dimColor>none yet</Text> : null}
@@ -995,15 +984,15 @@ export const register: Register = (on, options) => {
           </Box>
         ))}
 
-        {joint('j-mcp', C.agents)}
+        {gap('j-mcp')}
         {box('mcp', C.mcp, 'MCP', cat.servers.length ? `${mcpActive.size} in use · ${cat.servers.length} servers` : '', mcpBody)}
 
-        {joint('j-skills', C.mcp)}
+        {gap('j-skills')}
         {box('skills', C.skills, 'SKILLS', skillUses.length ? `${skillActive.size} in use` : '', skillsBody)}
 
-        {joint('j-background', C.skills)}
+        {gap('j-background')}
         {box('background', C.shells, 'BACKGROUND', backgroundCount(liveShells), bgBody)}
-        {items.length || prog.plan ? joint('j-progress', C.shells) : null}
+        {items.length || prog.plan ? gap('j-progress') : null}
         {items.length || prog.plan ? box('progress', C.progress, 'PROGRESS', items.length ? `${finished}/${items.length}` : '', progBody) : null}
 
         {hint('tab next · ⏎ open · ↑↓ scroll · esc prompt')}
