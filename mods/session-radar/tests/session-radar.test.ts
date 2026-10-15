@@ -16,7 +16,7 @@ const PANE = (bodyColumns = 46, isFocused = false) => ({
 })
 
 // Stands in for the engine beneath the plugin.
-function world(on: On, { files = {}, now = 1_000_000, git }: { files?: Record<string, string>; now?: number; git?: string } = {}) {
+function world(on: On, { files = {}, now = 1_000_000, git, ps }: { files?: Record<string, string>; now?: number; git?: string; ps?: string } = {}) {
   const clock = mock.clock(on, { now })
   const toasts: string[] = []
   const opened: string[] = []
@@ -36,6 +36,14 @@ function world(on: On, { files = {}, now = 1_000_000, git }: { files?: Record<st
   on('agent.list', () => ({ value: [] }))
   on('session.cwd', () => ({ value: '/home/me/app' }))
   on('process.run', (_$, e) => {
+    const ran = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+    if (e.argv[0] === 'tail' && e.argv[2] === '1') {
+      const paths = e.argv.slice(4).filter(f => files[f] !== undefined)
+      const last = (f: string) => `${files[f]!.trimEnd().split('\n').at(-1)}\n`
+      return ran(paths.length === 1 ? last(paths[0]!) : paths.map(f => `==> ${f} <==\n${last(f)}`).join('\n'))
+    }
+    if (e.argv[0] === 'sh') return ran('900\n')
+    if (e.argv[0] === 'ps' && ps !== undefined) return ran(ps)
     const isGit = git !== undefined && e.argv[0] === 'git' && e.argv.includes('--path-format=absolute')
     return { value: { exitCode: isGit ? 0 : 1, stdout: isGit ? git : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
@@ -480,7 +488,7 @@ test('MCP servers are listed, and one shows as in use only while its call runs',
     during = await look?.()
     return { result: { content: [] } } as never
   })
-  await start($)
+  await $.session.start({ cwd: '/home/me/app', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE(), surface: 'terminal' })
   look = async () => (await ui.find({ text: /sentry · search_issues/ }))?.text
 
@@ -516,7 +524,7 @@ test('a skill shows on the agent that called it until that agent ends', async ($
     await $.skill.prompt({ skill: e.skill, text: 'review' })
     return { result: { success: true, commandName: e.skill } } as never
   })
-  await start($)
+  await $.session.start({ cwd: '/home/me/app', surface: 'terminal', isInteractive: true })
   await $.agent.spawn(SPAWN)
   await $.tool.call({ tool: 'Skill', skill: 'code-review', agentId: 'ag1' } as Parameters<typeof $.tool.call>[0])
 
@@ -537,7 +545,7 @@ test('a skill typed by the person is in use until the turn stops', async ($, on)
   world(on)
   const start = startWith(on, [], ['simplify'])
   on('skill.prompt', (_$, e) => ({ text: e.text }))
-  await start($)
+  await $.session.start({ cwd: '/home/me/app', surface: 'terminal', isInteractive: true })
   await $.skill.prompt({ skill: 'simplify', text: 'go' })
 
   const ui = await $.ui.mount({ ...PANE(), surface: 'terminal' })
@@ -558,4 +566,78 @@ test('at most four agent cards show', async ($, on) => {
   expect(await ui.find({ key: 'agent-ag6' })).toBeDefined()
   expect(await ui.find({ key: 'agent-ag2' })).toBeUndefined()
   expect(await ui.find({ text: '+ 2 more running' })).toBeDefined()
+})
+
+// What session.start asks of the engine, so the radar's ticker runs.
+function startable(on: On) {
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200_000 }, rateLimits: [] } }))
+  on('command.register', () => ({ value: { command: 'radar' } }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+}
+
+test('a shell whose output ends with the exit line is marked done without a notice', async ($, on) => {
+  const files: Record<string, string> = { '/tmp/claude/tasks/b20.output': 'Tests  3 passed (3)\n' }
+  const w = world(on, { files })
+  startable(on)
+  answerBash(on, 'b20')
+  await $.session.start({ cwd: '/home/me/app', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: 'Bash', ...background('b20', 'vitest run') })
+
+  await w.clock.advance(5000)
+  const ui = await $.ui.mount({ ...PANE(), surface: 'terminal' })
+  expect(await ui.find({ text: '1 shell' })).toBeDefined()
+
+  files['/tmp/claude/tasks/b20.output'] += '\n[exited with code 1]\n'
+  await w.clock.advance(5000)
+  expect(await ui.find({ text: '1 shell' })).toBeUndefined()
+  expect(w.toasts).toEqual(['✗ shell failed: vitest run (exit 1)'])
+
+  // The notice arriving late changes nothing and says nothing again.
+  await $.session.receive(notice('b20', 'failed', 'Background command "vitest run" failed with exit code 1'))
+  expect(w.toasts).toHaveLength(1)
+})
+
+test('an opened shell that has exited says so, offers no Stop and shows its result', async ($, on) => {
+  const output = ' Test Files  321 passed (321)\n      Tests  3931 passed (3931)\n\n[exited with code 0]\n'
+  world(on, { files: { '/tmp/claude/tasks/b21.output': output } })
+  answerBash(on, 'b21')
+  await $.tool.call({ tool: 'Bash', ...background('b21', 'pnpm verify') })
+
+  const ui = await $.ui.mount({ ...PANE(60, true), surface: 'terminal' })
+  await ui.press({ key: 'shell-b21' })
+
+  expect(await ui.find({ text: '✓ exit 0' })).toBeDefined()
+  expect(await ui.find({ text: /running/ })).toBeUndefined()
+  expect(await ui.find({ text: '● live' })).toBeUndefined()
+  expect(await ui.find({ key: 'stop' })).toBeUndefined()
+  expect(await ui.find({ text: '3931 passed · 321 files' })).toBeDefined()
+})
+
+test('a shell shows the id of its process', async ($, on) => {
+  const ps = [
+    '  900     1 claude',
+    ` 4242   900 /usr/bin/zsh -c source snap.sh && eval 'npm run dev -- --port 3000' < /dev/null && pwd -P`,
+    ' 4250  4242 node vite',
+    ` 5555   777 /usr/bin/zsh -c eval 'echo it'\\''s here' < /dev/null`,
+  ].join('\n')
+  const w = world(on, { ps })
+  startable(on)
+  on('tool.call', { tool: 'Bash' }, (_$, e) => {
+    const id = e.command.startsWith('npm') ? 'b22' : 'b23'
+    return {
+      result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: id },
+      text: `Command running in background with ID: ${id}. Output is being written to: /tmp/claude/tasks/${id}.output.`,
+    }
+  })
+  await $.session.start({ cwd: '/home/me/app', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: 'Bash', ...background('b22', 'npm run dev -- --port 3000') })
+  await $.tool.call({ tool: 'Bash', ...background('b23', "echo it's here") })
+  await w.clock.advance(5000)
+
+  const ui = await $.ui.mount({ ...PANE(60, true), surface: 'terminal' })
+  expect(await ui.find({ text: '4242 ' })).toBeDefined()
+  expect(await ui.find({ text: '5555 ' })).toBeDefined()
+  await ui.press({ key: 'shell-b22' })
+  expect(await ui.find({ text: 'pid 4242' })).toBeDefined()
 })

@@ -3,8 +3,8 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { AgentRow, AgentStatusName, Catalog, Cron, InUse, Main, ProgressItem, ShellRow, Usage, View } from '../types'
 import {
-  addSamples, clip, clock, duration, effortMeter, gauge, modelName, shortPath, stopwatch, exitCodeOf, forecast, lastLine, limitLabel,
-  mcpParts, outputPathOf, pack, parentDir, parseTaskNotice, resetLabel, tail, tokens,
+  addSamples, clip, clock, duration, effortMeter, exitTrailer, findPid, gauge, modelName, shortPath, stopwatch, exitCodeOf, forecast,
+  lastLine, limitLabel, mcpParts, outputPathOf, pack, parentDir, parsePs, parseTails, parseTaskNotice, resetLabel, tail, testSummary, tokens,
 } from './lib'
 import type { TaskNotice } from './lib'
 
@@ -21,7 +21,7 @@ const LIST_ROWS = 2
 const ACTIVE_ROWS = 3
 const C = {
   main: '#d97757', agents: '#a5b4fc', shells: '#4ade80', progress: '#c084fc',
-  warn: '#facc15', bad: '#f87171', branch: '#7ab7ff', mcp: '#38bdf8', skills: '#f472b6',
+  warn: '#facc15', bad: '#f87171', branch: '#7ab7ff', mcp: '#38bdf8', skills: '#f472b6', pid: '#5eead4',
 } as const
 const FINISHED_SHELLS_SHOWN = 3
 // Beyond this the newest live tasks show and the rest are counted.
@@ -48,6 +48,8 @@ let outputTimer: Timer | undefined
 let ticks = 0
 // The radar's own version, from its plugin.json; '' when it cannot be read.
 let version: string | undefined
+// The engine's own process, the parent of the shells it starts; null when it cannot be read.
+let enginePid: number | null | undefined
 // Agent tool calls that asked for a worktree, until agent.spawn names the agent.
 const worktreeCalls = new Set<string>()
 const branchOf = new Map<string, { branch?: string; isWorktree: boolean }>()
@@ -185,6 +187,51 @@ async function reconcileShells($: EngineInterface, inFlight: readonly { id: stri
   })
 }
 
+// A background task ended, however we heard: the row is marked once, with one toast.
+async function finishShell($: EngineInterface, id: string, end: { status: ShellRow['status']; summary: string; exitCode?: number; endedAt: number; outputPath?: string }) {
+  const shell = (await read($, shells))[id]
+  if (!shell || shell.status !== 'running') return
+  await patchShell($, id, s => ({ ...s, ...end, outputPath: s.outputPath ?? end.outputPath }))
+  const code = end.exitCode ?? exitCodeOf(end.summary)
+  $.ui.toast(`${end.status === 'completed' ? '✓' : '✗'} ${shell.kind} ${end.status}: ${clip(shell.command, 40)}${code !== undefined ? ` (exit ${code})` : ''}`)
+}
+
+async function readEnginePid($: EngineInterface) {
+  const ran = await $.process.run(['sh', '-c', 'echo $PPID'], { timeoutMs: 3000 }).catch(() => undefined)
+  const pid = Number(ran?.stdout.trim())
+  return ran?.exitCode === 0 && pid > 1 ? pid : null
+}
+
+// The engine's word on a live task, read from the task itself rather than
+// waited for: its output file's last line once it exits, and its process id.
+async function checkShells($: EngineInterface, only?: string) {
+  const live = Object.values(await read($, shells)).filter(s => s.status === 'running' && (only === undefined || s.id === only))
+  const files = live.flatMap(s => (s.outputPath ? [s.outputPath] : []))
+  if (files.length) {
+    const ran = await $.process.run(['tail', '-n', '1', '--', ...files], { timeoutMs: 3000 }).catch(() => undefined)
+    const last = parseTails(ran?.stdout ?? '', files)
+    for (const s of live) {
+      const code = exitTrailer(s.outputPath ? last.get(s.outputPath) : undefined)
+      if (code === undefined) continue
+      const endedAt = (await $.fs.stat(s.outputPath!).catch(() => undefined))?.mtimeMs || (await $.clock.now())
+      await finishShell($, s.id, { status: code === 0 ? 'completed' : 'failed', summary: `exit code ${code}`, exitCode: code, endedAt })
+    }
+  }
+  const unknown = live.filter(s => s.pid === undefined && s.command)
+  if (unknown.length === 0) return
+  enginePid ??= await readEnginePid($)
+  const ps = await $.process.run(['ps', '-A', '-ww', '-o', 'pid=,ppid=,args='], { timeoutMs: 3000 }).catch(() => undefined)
+  if (!ps || ps.exitCode !== 0) return
+  const procs = parsePs(ps.stdout)
+  const taken = new Set(Object.values(await read($, shells)).flatMap(s => (s.pid ? [s.pid] : [])))
+  for (const s of unknown) {
+    const pid = findPid(procs, s.command, enginePid ?? undefined, taken)
+    if (pid === undefined) continue
+    taken.add(pid)
+    await patchShell($, s.id, x => ({ ...x, pid }))
+  }
+}
+
 // "1 shell · 4 monitors", the way the footer counts what runs in the background.
 function backgroundCount(live: readonly ShellRow[]) {
   const shells = live.filter(x => x.kind === 'shell').length
@@ -197,6 +244,7 @@ async function onTick($: EngineInterface) {
   ticks += 1
   await update($, tick, () => ticks)
   await pollAgents($)
+  await checkShells($)
   if (ticks % BRANCH_EVERY_TICKS === 0) {
     await refreshBranches($)
     await refreshCatalog($)
@@ -221,6 +269,7 @@ async function refreshOutput($: EngineInterface) {
   const v = await read($, view)
   const shell = v.shellId ? (await read($, shells))[v.shellId] : undefined
   if (v.screen !== 'shell' || !shell) return
+  if (shell.status === 'running') await checkShells($, shell.id)
   const got = await readOutput($, shell, MAX_OUTPUT_LINES)
   const at = await $.clock.now()
   await update($, output, () => ({ shellId: shell.id, at, ...got }))
@@ -281,9 +330,10 @@ async function applyNotice($: EngineInterface, notice: TaskNotice) {
   const shell = (await read($, shells))[notice.id]
   const agent = (await read($, agents))[notice.id]
   if (shell && shell.status === 'running') {
-    await patchShell($, notice.id, s => ({ ...s, status: notice.status, endedAt: now, summary: notice.summary, outputPath: s.outputPath ?? notice.outputPath }))
     const code = exitCodeOf(notice.summary)
-    $.ui.toast(`${notice.status === 'completed' ? '✓' : '✗'} shell ${notice.status}: ${clip(shell.command, 40)}${code ? ` (exit ${code})` : ''}`)
+    await finishShell($, notice.id, {
+      status: notice.status, summary: notice.summary, endedAt: now, outputPath: notice.outputPath, exitCode: code === undefined ? undefined : Number(code),
+    })
   } else if (agent && !ENDED.has(agent.status)) {
     const status: AgentStatusName = notice.status
     await patchAgent($, notice.id, a => ({ ...a, status, endedAt: now }))
@@ -651,11 +701,20 @@ export const register: Register = (on, options) => {
       const out = await read($, output)
       if (!shell) return <Box flexDirection="column"><Button key="back" autoFocus plain hotkey="b" label="back" onPress={() => void back($)} /></Box>
       const room = Math.max(4, (e.viewport?.rows ?? 30) - 14)
-      const lines = out?.shellId === shell.id ? out.lines.slice(-room) : []
-      const isLive = shell.status === 'running'
-      const statusColor = isLive ? C.shells : shell.status === 'completed' ? undefined : C.bad
+      const all = out?.shellId === shell.id ? out.lines : []
+      const lines = all.slice(-room)
+      // The output's own last line outranks the row: the view never says running under "[exited …]".
+      const trailer = exitTrailer(all.at(-1))
+      const isLive = shell.status === 'running' && trailer === undefined
+      const code = shell.exitCode ?? trailer
+      const status = isLive ? 'running' : shell.status === 'running' ? (trailer === 0 ? 'completed' : 'failed') : shell.status
+      const isGood = status === 'completed'
+      const statusColor = isLive ? C.shells : isGood ? C.shells : C.bad
+      const statusText = isLive ? '● running' : status === 'killed' ? '✗ killed' : `${isGood ? '✓' : '✗'} ${code !== undefined ? `exit ${code}` : status}`
       const owner = shell.agentId ? ((await read($, agents))[shell.agentId]?.type ?? 'agent') : 'main'
-      const took = stopwatch((shell.endedAt ?? now) - shell.startedAt)
+      const took = stopwatch((shell.endedAt ?? (isLive ? now : (out?.at ?? now))) - shell.startedAt)
+      const result = testSummary(all)
+      const meta = [shell.kind, `by ${owner}`, shell.id].join(' · ')
       return (
         <Box flexDirection="column" width={W}>
           <Box flexDirection="column" borderStyle="round" borderColor={C.shells} paddingX={1} width={W}>
@@ -664,11 +723,17 @@ export const register: Register = (on, options) => {
                 <Button key="back" autoFocus plain hotkey="b" label="back" onPress={() => void back($)} />
                 <Text color={C.shells} bold>{`  ${clip(shell.description || shell.command, IN - 22)}`}</Text>
               </Box>
-              <Text color={statusColor}>{`${isLive ? '●' : shell.status === 'completed' ? '✓' : '✗'} ${shell.status}`}</Text>
+              <Text color={statusColor} bold={!isLive}>{statusText}</Text>
             </Box>
             {shell.description ? <Text wrap="truncate-end">{clip(`$ ${shell.command}`, IN)}</Text> : null}
-            <Text dimColor>{clip(`${took} · ${shell.kind} · by ${owner} · ${shell.id}`, IN)}</Text>
-            {shell.summary ? <Text dimColor>{clip(shell.summary, IN)}</Text> : null}
+            <Text wrap="truncate-end">
+              {shell.pid ? <Text color={C.pid}>{`pid ${shell.pid}`}</Text> : null}
+              {shell.pid ? <Text dimColor>{' · '}</Text> : null}
+              <Text>{`${isLive ? 'running' : 'ran'} ${took}`}</Text>
+              <Text dimColor>{clip(` · ${meta}`, Math.max(0, IN - took.length - 8 - (shell.pid ? String(shell.pid).length + 7 : 0)))}</Text>
+            </Text>
+            {result ? <Text color={isLive ? undefined : statusColor} bold wrap="truncate-end">{clip(result, IN)}</Text> : null}
+            {!result && shell.summary && exitCodeOf(shell.summary) === undefined ? <Text dimColor>{clip(shell.summary, IN)}</Text> : null}
           </Box>
           <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={1} width={W}>
             <Box justifyContent="space-between" width={IN}>
@@ -889,11 +954,13 @@ export const register: Register = (on, options) => {
       const isLive = x.status === 'running'
       const glyph = isLive ? '●' : x.status === 'completed' ? '✓' : '✗'
       const color = isLive ? C.shells : x.status === 'completed' ? undefined : C.bad
+      const pid = x.pid ? `${x.pid} ` : ''
       return (
         <Box key={`s-${x.id}`} justifyContent="space-between" width={IN}>
           <Box>
             <Text color={color} dimColor={!isLive}>{`${glyph} `}</Text>
-            <Button key={`shell-${x.id}`} plain dimColor={!isLive || undefined} label={clip(x.description || x.command, IN - time.length - 4)} onPress={() => void openShell($, x.id)} />
+            {pid ? <Text color={C.pid} dimColor={!isLive}>{pid}</Text> : null}
+            <Button key={`shell-${x.id}`} plain dimColor={!isLive || undefined} label={clip(x.description || x.command, IN - time.length - pid.length - 4)} onPress={() => void openShell($, x.id)} />
           </Box>
           <Text dimColor>{time}</Text>
         </Box>

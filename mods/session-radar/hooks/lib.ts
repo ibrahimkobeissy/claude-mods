@@ -184,3 +184,62 @@ export function pack(words: readonly string[], width: number, gap: number) {
   })
   return rows
 }
+
+// The engine ends a background shell's output file with "[exited with code N]".
+export function exitTrailer(line: string | undefined) {
+  const code = line?.trim().match(/^\[exited with code (-?\d+)\]$/)?.[1]
+  return code === undefined ? undefined : Number(code)
+}
+
+// What `tail -n 1 a b c` prints: a "==> a <==" header before each file's lines
+// once there is more than one file.
+export function parseTails(stdout: string, paths: readonly string[]) {
+  const last = new Map<string, string>()
+  if (paths.length === 1) {
+    last.set(paths[0]!, lastLine(stdout))
+    return last
+  }
+  for (const part of stdout.split(/^==> /m).slice(1)) {
+    const cut = part.indexOf(' <==')
+    if (cut >= 0) last.set(part.slice(0, cut), lastLine(part.slice(cut + 4)))
+  }
+  return last
+}
+
+export type Proc = { pid: number; ppid: number; args: string }
+
+// `ps -A -ww -o pid=,ppid=,args=`, one process per line.
+export function parsePs(stdout: string): Proc[] {
+  return stdout.split('\n').flatMap(line => {
+    const m = line.match(/^\s*(\d+)\s+(\d+)\s+(.*)$/)
+    return m ? [{ pid: Number(m[1]), ppid: Number(m[2]), args: m[3]! }] : []
+  })
+}
+
+// The shell the engine started for `command`: it runs it as `eval '<command>'`,
+// single quotes escaped. One the engine itself started comes first.
+export function findPid(procs: readonly Proc[], command: string, enginePid: number | undefined, taken: ReadonlySet<number>) {
+  const quoted = `eval '${command.replace(/'/g, `'\\''`)}'`
+  const hits = procs.filter(p => !taken.has(p.pid) && p.args.includes(quoted))
+  return (hits.find(p => p.ppid === enginePid) ?? hits[0])?.pid
+}
+
+// One line on how a test run ended, when the output has a runner's summary:
+// vitest, jest, node --test or pytest.
+export function testSummary(lines: readonly string[]) {
+  const text = lines.join('\n')
+  // The last run's summary, when the output holds several.
+  const vitest = [...text.matchAll(/^\s*Tests\s+(.+?)\s*$/gm)].at(-1)
+  if (vitest && /\d+ (passed|failed)/.test(vitest[1]!)) {
+    const files = text.match(/^\s*Test Files\s+.*?(\d+) passed/m)?.[1]
+    return `${vitest[1]!.replace(/\s*\(\d+\)$/, '').replace(/\s*\|\s*/g, ' · ')}${files ? ` · ${files} files` : ''}`
+  }
+  const jest = text.match(/^Tests:\s+(.+?)\s*$/m)
+  if (jest) return jest[1]!.replace(/, \d+ total$/, '').replace(/, /g, ' · ')
+  const pass = text.match(/^ℹ pass (\d+)$/m)?.[1]
+  const fail = text.match(/^ℹ fail (\d+)$/m)?.[1]
+  if (pass !== undefined) return `${pass} passed${fail && fail !== '0' ? ` · ${fail} failed` : ''}`
+  const pytest = text.match(/^=+ (.*\b(?:passed|failed)\b.*?) in [\d.]+s.* =+$/m)
+  if (pytest) return pytest[1]!.replace(/, /g, ' · ')
+  return undefined
+}

@@ -26,7 +26,7 @@ Each part of the session gets its own colour-coded box:
 | **Agents** (lavender) | Up to four cards, one per subagent: task, type, context, tool calls, errors, branch or worktree, running time, and the MCP server or skill it is using right now. Select a card to see its last message |
 | **MCP** (sky) | Every connected MCP server with its tool count, in two rows (`+ N more` shows the rest). A server lights up while one of its tools is being called, with the tool and who called it |
 | **Skills** (pink) | The skills in use right now, by main or by agent. A skill counts as in use from when it is invoked until that agent's turn ends, so when Claude is idle nothing is lit. `+ N available` lists every skill, the ones in use highlighted |
-| **Background** (green) | The background shells and monitors the footer counts (`1 shell · 4 monitors`), running ones first, including those subagents started, plus scheduled cron jobs and `/loop` wakeups. Select one to open its live output |
+| **Background** (green) | The background shells and monitors the footer counts (`1 shell · 4 monitors`), running ones first, each with its process ID (teal), including those subagents started, plus scheduled cron jobs and `/loop` wakeups. Select one to open its live output, exit code and test result |
 | **Progress** (purple) | The task list and the approved plan, shown only when there is one |
 
 You also get a toast when a background shell or agent finishes or fails.
@@ -71,7 +71,7 @@ Set it from `/plugin` → session-radar → configure.
 
 ## Permissions and privacy
 
-It reads your session's own events and runs `git rev-parse` locally to find branches. It reads a background shell's output file only when you open that shell. No network access, and nothing is written to disk.
+It reads your session's own events and runs `git rev-parse` locally to find branches. While a background shell runs it reads the last line of its output file (where Claude Code writes `[exited with code N]`) and runs `ps` to find its process ID. No network access, and nothing is written to disk.
 
 ## Develop
 
