@@ -154,13 +154,6 @@ export function gauge(percent: number, width: number) {
   return { full: '▬'.repeat(full), empty: '▱'.repeat(width - full) }
 }
 
-// A dim rule with dots on it, the joint between two boxes.
-export function connector(width: number, dots: number) {
-  const cells = Array.from({ length: Math.max(0, width) }, () => '─')
-  for (let i = 1; i <= dots; i++) cells[Math.round((i * width) / (dots + 1))] = '•'
-  return cells.join('').split('•')
-}
-
 // "/home/me/projects/app" → "~/projects/app"; too long, it keeps the end: "…/deep/app".
 export function shortPath(path: string, home: string | undefined, width: number) {
   const tilde = home && (path === home || path.startsWith(`${home}/`)) ? `~${path.slice(home.length)}` : path

@@ -474,13 +474,15 @@ test('MCP servers are listed, and one shows as in use only while its call runs',
   world(on)
   const start = startWith(on, TOOLS, [])
   let during: string | undefined
-  let ui: Awaited<ReturnType<typeof $.ui.mount>> | undefined
+  // The pane as it is drawn while the call runs.
+  let look: (() => Promise<string | undefined>) | undefined
   on('tool.call', { tool: 'mcp__sentry__search_issues' }, async () => {
-    during = (await ui?.find({ text: /sentry · search_issues/ }))?.text
+    during = await look?.()
     return { result: { content: [] } } as never
   })
   await start($)
-  ui = await $.ui.mount({ ...PANE(), surface: 'terminal' })
+  const ui = await $.ui.mount({ ...PANE(), surface: 'terminal' })
+  look = async () => (await ui.find({ text: /sentry · search_issues/ }))?.text
 
   expect(await ui.find({ text: /sentry \(2\)/ })).toBeDefined()
   expect(await ui.find({ text: /claude\.ai Gmail \(1\)/ })).toBeDefined()
