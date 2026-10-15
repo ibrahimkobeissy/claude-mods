@@ -639,8 +639,6 @@ export const register: Register = (on, options) => {
         {isFolded(section) ? null : body}
       </Box>
     )
-    // A blank row between two boxes.
-    const gap = (key: string) => <Box key={key} marginTop={1} />
     const hint = (focused: string) => (
       <Box key="hint" marginTop={1}>
         <Text dimColor>{clip(e.props.isFocused ? focused : 'ctrl+x tab to use · /radar to close', W)}</Text>
@@ -672,7 +670,6 @@ export const register: Register = (on, options) => {
             <Text dimColor>{clip(`${took} · ${shell.kind} · by ${owner} · ${shell.id}`, IN)}</Text>
             {shell.summary ? <Text dimColor>{clip(shell.summary, IN)}</Text> : null}
           </Box>
-          {gap('j-out')}
           <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={1} width={W}>
             <Box justifyContent="space-between" width={IN}>
               <Text dimColor>{`output · last ${lines.length} lines`}</Text>
@@ -971,7 +968,6 @@ export const register: Register = (on, options) => {
         <Box marginTop={n ? 0 : 1} />
         {box('main', C.main, `${model} · main`, '', mainBody)}
 
-        {gap('j-agents')}
         {box('agents', C.agents, 'AGENTS', agentRows.length ? `${running.length} running · ${agentRows.length} total` : '', (
           <Box flexDirection="column">
             {shown.length === 0 ? <Text dimColor>none yet</Text> : null}
@@ -984,15 +980,11 @@ export const register: Register = (on, options) => {
           </Box>
         ))}
 
-        {gap('j-mcp')}
         {box('mcp', C.mcp, 'MCP', cat.servers.length ? `${mcpActive.size} in use · ${cat.servers.length} servers` : '', mcpBody)}
 
-        {gap('j-skills')}
         {box('skills', C.skills, 'SKILLS', skillUses.length ? `${skillActive.size} in use` : '', skillsBody)}
 
-        {gap('j-background')}
         {box('background', C.shells, 'BACKGROUND', backgroundCount(liveShells), bgBody)}
-        {items.length || prog.plan ? gap('j-progress') : null}
         {items.length || prog.plan ? box('progress', C.progress, 'PROGRESS', items.length ? `${finished}/${items.length}` : '', progBody) : null}
 
         {hint('tab next · ⏎ open · ↑↓ scroll · esc prompt')}
